@@ -1,48 +1,48 @@
 # Vision Hub
 
-Android wearable-side vision hub app for receiving sensor and image data over TCP, detecting falls locally, and showing current service/vision status in a simple Compose UI.
+这是一个运行在 Android 设备侧的视觉中枢应用，用于通过 TCP 接收传感器数据和图像帧，在本地执行跌倒检测，并在简洁的 Compose 界面上展示服务状态、连接状态和本地视觉状态。
 
-## Current capabilities
+## 当前能力
 
-- Foreground service keeps the pipeline running in the background
-- TCP server listens for incoming sensor JSON frames and JPEG image frames
-- Fall detection state machine processes IMU data and can trigger an emergency call
-- Local vision pipeline consumes JPEG bytes and publishes a simple analysis status
-- Home screen shows connection state, local vision state, and fall alert state
+- 以前台服务方式在后台持续运行
+- 通过 TCP 接收传感器 JSON 帧和 JPEG 图像帧
+- 本地跌倒检测状态机处理 IMU 数据，并可尝试发起紧急呼叫
+- 本地视觉流水线消费 JPEG 字节流，并发布当前分析状态
+- 首页展示连接状态、本地视觉状态和跌倒告警状态
 
-## Tech stack
+## 技术栈
 
 - Kotlin
-- Android app module with Gradle Kotlin DSL
+- Android 单模块应用，使用 Gradle Kotlin DSL
 - Jetpack Compose + Material 3
-- Kotlin coroutines and Flow
+- Kotlin Coroutines + Flow
 
-## Project structure
+## 项目结构
 
-- `app/src/main/java/com/example/myapplication/MainActivity.kt` — app entry, permission requests, and current UI
-- `app/src/main/java/com/example/myapplication/VisionHubService.kt` — foreground service orchestration
-- `app/src/main/java/com/example/myapplication/VisionTcpServer.kt` — TCP listener on port `8080`
-- `app/src/main/java/com/example/myapplication/VisionStreamDecoder.kt` — decodes newline JSON sensor packets and JPEG frames
-- `app/src/main/java/com/example/myapplication/FallDetectionEngine.kt` — fall detection state machine
-- `app/src/main/java/com/example/myapplication/LocalVisionAnalyzer.kt` — current local image-frame analyzer
-- `app/src/main/java/com/example/myapplication/VisionDataHub.kt` — in-memory Flow hub for sensor/image/state updates
+- `app/src/main/java/com/example/myapplication/MainActivity.kt` — 应用入口、权限请求和当前 UI
+- `app/src/main/java/com/example/myapplication/VisionHubService.kt` — 前台服务编排中心
+- `app/src/main/java/com/example/myapplication/VisionTcpServer.kt` — TCP 监听服务，默认端口 `8080`
+- `app/src/main/java/com/example/myapplication/VisionStreamDecoder.kt` — 解析换行 JSON 传感器帧和 JPEG 二进制帧
+- `app/src/main/java/com/example/myapplication/FallDetectionEngine.kt` — 跌倒检测状态机
+- `app/src/main/java/com/example/myapplication/LocalVisionAnalyzer.kt` — 当前本地图像分析器
+- `app/src/main/java/com/example/myapplication/VisionDataHub.kt` — 传感器 / 图像 / 状态的内存 Flow 中枢
 
-## Requirements
+## 环境要求
 
-- JDK 17 for Gradle/AGP tasks
-- Android Studio or Android SDK tools
-- Device or emulator for running the app
+- JDK 17（运行 Gradle / AGP 必须使用）
+- Android Studio 或 Android SDK 工具链
+- 可运行应用的真机或模拟器
 
-Set JDK 17 before running Gradle commands:
+执行 Gradle 命令前先切到 JDK 17：
 
 ```bash
 export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
 ```
 
-## Build and test
+## 构建与测试
 
-From the repository root:
+在项目根目录执行：
 
 ```bash
 ./gradlew assembleDebug
@@ -50,218 +50,220 @@ From the repository root:
 ./gradlew lintDebug
 ```
 
-Run a single unit test:
+运行单个单元测试：
 
 ```bash
 ./gradlew testDebugUnitTest --tests "com.example.myapplication.LocalVisionAnalyzerTest"
 ```
 
-Install to a connected device/emulator:
+安装到已连接设备或模拟器：
 
 ```bash
 ./gradlew installDebug
 ```
 
-## Run the app
+## 运行方式
 
 ### Android Studio
 
-1. Open this project in Android Studio
-2. Make sure Gradle uses JDK 17
-3. Connect a device or start an emulator
-4. Run the `app` configuration
+1. 用 Android Studio 打开本项目
+2. 确认 Gradle 使用的是 JDK 17
+3. 连接真机或启动模拟器
+4. 运行 `app` 配置
 
-### What happens on startup
+### 启动时会发生什么
 
-- `MainActivity` requests notification and phone-call permissions when needed
-- The app starts `VisionHubService`
-- The service enters foreground mode and starts the TCP server
-- The TCP server listens on port `8080`
+- `MainActivity` 会在需要时请求通知权限
+- 应用启动 `VisionHubService`
+- 服务进入前台模式并启动 TCP 服务器
+- TCP 服务器开始监听 `8080` 端口
 
-## API documentation
+## API 文档
 
-This project currently exposes a **device-side TCP ingest API** rather than an HTTP REST API. External senders connect to the Android device on port `8080` and stream sensor JSON frames and JPEG image frames into the app.
+当前项目对外暴露的是**设备侧 TCP 接入 API**，不是 HTTP REST API。外部发送端连接 Android 设备的 `8080` 端口后，可以连续发送传感器 JSON 帧和 JPEG 图像帧给应用处理。
 
-### API summary
+### API 概览
 
-| Item | Value |
+| 项目 | 值 |
 | --- | --- |
-| Protocol | TCP |
-| Default port | `8080` |
-| Direction | Client → device only |
-| App response | No application-layer response body |
-| Supported frame types | Newline-delimited JSON sensor frames, JPEG binary frames |
-| Frame ordering | Preserved in receive order |
-| Connection handling | Single TCP stream can mix sensor frames and image frames |
+| 协议 | TCP |
+| 默认端口 | `8080` |
+| 数据方向 | Client → Device |
+| 应用响应 | 无应用层响应体 |
+| 支持帧类型 | 换行分隔的 JSON 传感器帧、JPEG 二进制帧 |
+| 帧顺序 | 按接收顺序处理 |
+| 连接方式 | 同一条 TCP 连接中可混合发送传感器帧和图像帧 |
 
-### TCP endpoint
+### TCP 端点
 
-The app starts a local TCP server in `app/src/main/java/com/example/myapplication/VisionTcpServer.kt`.
+应用在 `app/src/main/java/com/example/myapplication/VisionTcpServer.kt` 中启动本地 TCP 服务。
 
-- Port: `8080`
-- Host: the Android device IP address reachable from your sender
-- Transport: plain TCP
-- Authentication: none
-- Encryption: none
+- 端口：`8080`
+- 主机：Android 设备当前可被发送端访问到的 IP 地址
+- 传输层：纯 TCP
+- 鉴权：无
+- 加密：无
 
-### Stream format
+### 数据流格式
 
-A single TCP connection may contain a mix of the following payloads:
+一条 TCP 连接中可以混合包含以下两类数据：
 
-1. **Sensor JSON frames** separated by newline (`\n`)
-2. **JPEG image frames** detected by JPEG SOI/EOI markers (`0xFF 0xD8 ... 0xFF 0xD9`)
+1. **传感器 JSON 帧**，以换行符 `\n` 分隔
+2. **JPEG 图像帧**，通过 JPEG 起止标记识别：`0xFF 0xD8 ... 0xFF 0xD9`
 
-The decoder is implemented in `app/src/main/java/com/example/myapplication/VisionStreamDecoder.kt`.
+解码逻辑位于：
+`app/src/main/java/com/example/myapplication/VisionStreamDecoder.kt`
 
-#### Sensor frame format
+#### 传感器帧格式
 
-Each sensor frame must be one complete JSON object followed by a newline.
+每个传感器帧必须是一个完整 JSON 对象，并以换行结束。
 
-Example:
+示例：
 
 ```json
 {"radar_dist":120,"imu":{"ax":0.1,"ay":0.5,"az":9.8},"btn_a":0,"btn_b":1}
 ```
 
-Supported fields:
+支持字段如下：
 
-| Field | Type | Required | Description |
+| 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `radar_dist` | integer | yes | Radar distance reading |
-| `imu.ax` | number | yes | IMU acceleration X |
-| `imu.ay` | number | yes | IMU acceleration Y |
-| `imu.az` | number | yes | IMU acceleration Z |
-| `btn_a` | integer | yes | Button A state |
-| `btn_b` | integer | yes | Button B state |
+| `radar_dist` | integer | 是 | 雷达距离读数 |
+| `imu.ax` | number | 是 | IMU X 轴加速度 |
+| `imu.ay` | number | 是 | IMU Y 轴加速度 |
+| `imu.az` | number | 是 | IMU Z 轴加速度 |
+| `btn_a` | integer | 是 | 按键 A 状态 |
+| `btn_b` | integer | 是 | 按键 B 状态 |
 
-Notes:
+说明：
 
-- Numbers may be integer or decimal where applicable.
-- The current parser expects all keys to be present.
-- Malformed or missing-key JSON is not part of the supported contract.
+- 数值字段支持整数或小数（按当前解析逻辑）
+- 当前解析器要求所有字段都存在
+- 缺字段或格式不合法的 JSON 不属于当前支持范围
 
-#### JPEG frame format
+#### JPEG 帧格式
 
-A JPEG frame is any binary payload beginning with:
+JPEG 图像帧必须以以下字节开头：
 
 ```text
 FF D8
 ```
 
-and ending with:
+并以以下字节结束：
 
 ```text
 FF D9
 ```
 
-Notes:
+说明：
 
-- JPEG frames do **not** need a trailing newline.
-- JPEG and JSON frames may be interleaved on the same TCP stream.
-- The current local analyzer performs lightweight validation/analysis only; it does not yet do OCR or model inference.
+- JPEG 帧**不要求**末尾带换行
+- JPEG 和 JSON 可以在同一条 TCP 连接内交错发送
+- 当前本地视觉分析器只做轻量级校验/分析，还没有 OCR 或模型推理
 
-### Mixed-stream example
+### 混合流示例
 
-Valid stream order example:
+合法的数据流顺序示例：
 
-1. sensor JSON + newline
-2. sensor JSON + newline
-3. JPEG binary bytes
-4. sensor JSON + newline
+1. 传感器 JSON + 换行
+2. 传感器 JSON + 换行
+3. JPEG 二进制帧
+4. 传感器 JSON + 换行
 
-The app processes frames in the order they arrive.
+应用会严格按照到达顺序处理。
 
-### App-side processing contract
+### 应用侧处理约定
 
-Incoming data updates the app through `VisionDataHub` flows.
+收到的数据会通过 `VisionDataHub` 中的 Flow 向应用其它部分分发。
 
-#### Connection state
+#### 连接状态
 
-Published by `VisionTcpServer` through `VisionDataHub.connectionState`.
+由 `VisionTcpServer` 发布到 `VisionDataHub.connectionState`。
 
-| State | Meaning |
+| 状态 | 含义 |
 | --- | --- |
-| `STOPPED` | TCP server is not running |
-| `STARTING` | Service created, server not yet listening |
-| `LISTENING` | Server is listening for clients |
-| `CONNECTED` | At least one client is connected |
-| `ERROR` | Server failed unexpectedly |
+| `STOPPED` | TCP 服务未运行 |
+| `STARTING` | 服务已创建，但服务器尚未监听 |
+| `LISTENING` | 正在监听客户端连接 |
+| `CONNECTED` | 至少已有一个客户端连接成功 |
+| `ERROR` | TCP 服务出现异常 |
 
-#### Fall-detection pipeline
+#### 跌倒检测流水线
 
-Sensor packets are processed by `app/src/main/java/com/example/myapplication/FallDetectionEngine.kt`.
+传感器数据由 `app/src/main/java/com/example/myapplication/FallDetectionEngine.kt` 处理。
 
-Current default thresholds from `FallDetectionConfig.DEFAULT`:
+当前默认阈值来自 `FallDetectionConfig.DEFAULT`：
 
-| Setting | Value |
+| 配置项 | 值 |
 | --- | --- |
 | `freeFallThreshold` | `2.5` |
 | `impactThreshold` | `18.0` |
 | `impactWindowMillis` | `1000` |
 | `cooldownMillis` | `10000` |
 
-High-level behavior:
+高层逻辑如下：
 
-1. If acceleration magnitude drops below `freeFallThreshold`, state becomes `DETECTING`
-2. If a strong impact arrives within `impactWindowMillis`, the fall is confirmed
-3. The app attempts to call the configured emergency number
-4. The engine enters cooldown for `cooldownMillis`
+1. 若加速度模长低于 `freeFallThreshold`，状态进入 `DETECTING`
+2. 若在 `impactWindowMillis` 内检测到强冲击，则判定跌倒成立
+3. 应用尝试拨打配置好的紧急号码
+4. 引擎进入 `cooldownMillis` 冷却期
 
-Published UI-facing fall states:
+应用层展示的跌倒状态如下：
 
-| State | Meaning |
+| 状态 | 含义 |
 | --- | --- |
-| `IDLE` | Normal monitoring |
-| `DETECTING` | Possible fall detected |
-| `FALL_CONFIRMED` | Fall confirmed |
-| `EMERGENCY_CALLING` | Emergency call attempt in progress |
+| `IDLE` | 正常监测中 |
+| `DETECTING` | 检测到疑似跌倒 |
+| `FALL_CONFIRMED` | 已确认跌倒 |
+| `EMERGENCY_CALLING` | 正在尝试紧急呼叫 |
 
-#### Emergency-call behavior
+#### 紧急呼叫行为
 
-Configured in `app/src/main/java/com/example/myapplication/EmergencyContactConfig.kt`.
+配置文件位于：
+`app/src/main/java/com/example/myapplication/EmergencyContactConfig.kt`
 
-| Item | Current value |
+| 项目 | 当前值 |
 | --- | --- |
-| Emergency number | `112` |
-| Trigger action | `Intent.ACTION_CALL` |
-| Required permission | `CALL_PHONE` |
+| 紧急号码 | `112` |
+| 触发方式 | `Intent.ACTION_CALL` |
+| 所需权限 | `CALL_PHONE` |
 
-If `CALL_PHONE` is not granted or no call activity is available, the app does not place the call.
+如果设备未授予 `CALL_PHONE` 权限，或者系统中没有可处理拨号的 Activity，则不会发起呼叫。
 
-#### Local-vision pipeline
+#### 本地视觉流水线
 
-JPEG frames are consumed by `app/src/main/java/com/example/myapplication/LocalVisionAnalyzer.kt` and published through `VisionDataHub.localVisionState`.
+JPEG 图像帧会被 `app/src/main/java/com/example/myapplication/LocalVisionAnalyzer.kt` 消费，并发布到 `VisionDataHub.localVisionState`。
 
-Current local-vision states:
+当前本地视觉状态包括：
 
-| State | Meaning |
+| 状态 | 含义 |
 | --- | --- |
-| `IDLE` | Waiting for image frames |
-| `PROCESSING` | Latest frame is being analyzed |
-| `FRAME_ANALYZED` | Frame passed the current lightweight analyzer |
-| `ERROR` | Invalid frame or analysis failure |
+| `IDLE` | 等待图像帧 |
+| `PROCESSING` | 正在分析最新图像 |
+| `FRAME_ANALYZED` | 图像通过当前轻量分析器 |
+| `ERROR` | 图像无效或分析失败 |
 
-Current analyzer behavior:
+当前分析器行为：
 
-- validates that the payload looks like a JPEG frame
-- returns a summary string for the latest frame
-- does not yet perform OCR, object detection, or cloud upload
+- 校验输入是否像 JPEG 帧
+- 生成一条最近图像的摘要信息
+- 暂不执行 OCR、目标检测或云端上传
 
-### Sender examples
+### 发送端示例
 
-#### Send one sensor frame with `nc`
+#### 使用 `nc` 发送单条传感器帧
 
 ```bash
 printf '%s\n' '{"radar_dist":120,"imu":{"ax":0.1,"ay":0.5,"az":9.8},"btn_a":0,"btn_b":1}' | nc <device-ip> 8080
 ```
 
-#### Send a JPEG file with `nc`
+#### 使用 `nc` 发送 JPEG 文件
 
 ```bash
 cat frame.jpg | nc <device-ip> 8080
 ```
 
-#### Send mixed frames with Python
+#### 使用 Python 发送混合帧
 
 ```python
 import socket
@@ -275,17 +277,17 @@ with socket.create_connection(("<device-ip>", 8080)) as sock:
     sock.sendall(sensor)
 ```
 
-### Operational notes
+### 运行说明与限制
 
-- The server does not currently send acknowledgements back to the client.
-- The protocol is intended for trusted local-network/device testing in its current form.
-- There is no retry, auth, checksum, or message envelope yet.
-- A malformed payload may terminate processing for that connection.
-- The app UI is only a status surface; data ingestion and analysis happen in the foreground service.
+- 当前服务端不会向客户端返回确认响应
+- 当前协议面向受信任的本地网络 / 设备调试环境
+- 目前没有重试、鉴权、校验和或统一消息封装
+- 错误格式的数据可能导致当前连接的数据处理终止
+- UI 只负责展示状态；真正的数据接收和处理都发生在前台服务中
 
-## Permissions used
+## 权限说明
 
-Declared in `app/src/main/AndroidManifest.xml`:
+在 `app/src/main/AndroidManifest.xml` 中声明的权限如下：
 
 - `INTERNET`
 - `ACCESS_NETWORK_STATE`
@@ -295,15 +297,15 @@ Declared in `app/src/main/AndroidManifest.xml`:
 - `POST_NOTIFICATIONS`
 - `CALL_PHONE`
 
-## Current limitations
+## 当前限制
 
-- Local vision is still a lightweight placeholder analysis, not full OCR/TFLite inference
-- Emergency number is code-configured, not user-configurable in-app
-- UI is intentionally minimal and stays in a single activity/screen
-- No cloud OCR / LLM integration yet
+- 本地视觉仍是轻量级占位实现，还没有真正接入 OCR / TFLite 推理
+- 紧急联系人号码目前写在代码里，还不能在 App 内动态配置
+- UI 目前刻意保持为单 Activity / 单页面的简化结构
+- 还没有接入云端 OCR / LLM 流程
 
-## Notes
+## 备注
 
-- The app currently uses very new SDK targets (`minSdk 35`, `targetSdk 36`, `compileSdk 36`)
-- TCP default port is `8080`
-- GitHub repository: `jry21223/vision-hub`
+- 当前 SDK 配置较新：`minSdk 35`、`targetSdk 36`、`compileSdk 36`
+- TCP 默认端口：`8080`
+- GitHub 仓库：`jry21223/vision-hub`
