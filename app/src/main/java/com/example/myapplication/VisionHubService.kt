@@ -113,7 +113,6 @@ class VisionHubService : Service() {
     companion object {
         private const val WAKE_LOCK_TAG = "com.example.myapplication:VisionHubWakeLock"
         private const val FOREGROUND_SERVICE_TYPES =
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
     }
 }

@@ -29,19 +29,13 @@ import com.example.myapplication.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
     private val requestNotificationPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-            requestCallPermissionIfNeeded()
-        }
-
-    private val requestCallPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-            startVisionHubService()
-        }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        startVisionHubServiceWithPermissionChecks()
+        startVisionHubService()
+        requestNotificationPermissionIfNeeded()
         setContent {
             MyApplicationTheme {
                 val fallAlertState by VisionDataHub.fallAlertState.collectAsState()
@@ -59,7 +53,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startVisionHubServiceWithPermissionChecks() {
+    private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val notificationPermissionState = ContextCompat.checkSelfPermission(
                 this,
@@ -67,24 +61,8 @@ class MainActivity : ComponentActivity() {
             )
             if (notificationPermissionState != PackageManager.PERMISSION_GRANTED) {
                 requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                return
             }
         }
-
-        requestCallPermissionIfNeeded()
-    }
-
-    private fun requestCallPermissionIfNeeded() {
-        val callPermissionState = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.CALL_PHONE,
-        )
-        if (callPermissionState == PackageManager.PERMISSION_GRANTED) {
-            startVisionHubService()
-            return
-        }
-
-        requestCallPermission.launch(Manifest.permission.CALL_PHONE)
     }
 
     private fun startVisionHubService() {
