@@ -11,13 +11,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 class VisionHubService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var wakeLock: PowerManager.WakeLock? = null
-    private val fallDetectionEngine = FallDetectionEngine()
+
+    @Volatile
+    private var fallDetectionEngine = FallDetectionEngine()
     private val emergencyCallHandler = EmergencyCallHandler()
     private val localVisionAnalyzer = LocalVisionAnalyzer()
     private val tcpServer = VisionTcpServer(
@@ -40,6 +41,7 @@ class VisionHubService : Service() {
                 acquire()
             }
         }
+        observeFallConfig()
         observeSensorPackets()
         observeImageFrames()
         tcpServer.start()
@@ -76,6 +78,14 @@ class VisionHubService : Service() {
 
     override fun onBind(intent: Intent): IBinder? = null
 
+    private fun observeFallConfig() {
+        serviceScope.launch {
+            VisionDataHub.fallConfig.collect { newConfig ->
+                fallDetectionEngine = FallDetectionEngine(config = newConfig)
+            }
+        }
+    }
+
     private fun observeSensorPackets() {
         serviceScope.launch {
             VisionDataHub.sensorPackets.collect { packet ->
@@ -103,8 +113,9 @@ class VisionHubService : Service() {
     private fun observeImageFrames() {
         serviceScope.launch {
             VisionDataHub.imageFrames.collect { frame ->
+                if (!VisionDataHub.obstacleEnabled.value) return@collect
                 VisionDataHub.updateLocalVisionState(LocalVisionState.PROCESSING)
-                val result = localVisionAnalyzer.analyze(frame)
+                val result = localVisionAnalyzer.analyze(this@VisionHubService, frame)
                 VisionDataHub.updateLocalVisionState(result)
             }
         }
