@@ -1,246 +1,402 @@
-# 暖阳智视（VisionHub）
+# 暖阳智视 VisionHub
 
-暖阳智视是一个面向可穿戴陪护场景的视觉中枢项目：由 **ESP32-S3 设备端** 采集传感器与图像数据，发送到 **Android 手机端** 完成本地跌倒检测、障碍感知与药品识别，再按需接入 **Go 后端** 做事件上报、缓存、消息队列和持久化。
+> 面向老年人与视障群体的可穿戴 AI 视觉中枢——ESP32 胸牌采集、Android 手机端侧推理、Go 后端事件持久化三层协作。
 
-当前仓库已经拆分为两个主要开发分支：
+---
 
-- `android`：Android 应用主线
-- `backend`：Go 后端主线
+## 目录
 
-## 仓库内容
+- [产品定位](#产品定位)
+- [整体架构](#整体架构)
+- [各层详解](#各层详解)
+  - [ESP32 设备端](#1-esp32-设备端)
+  - [Android 手机端](#2-android-手机端)
+  - [Go 后端](#3-go-后端)
+  - [AI 模型管线](#4-ai-模型管线)
+- [数据流](#数据流)
+- [分支与目录结构](#分支与目录结构)
+- [快速开始](#快速开始)
+- [当前状态](#当前状态)
 
-本仓库当前目录主要承载 Android 端实现，同时保留后端目录与模型资源：
+---
 
-- `app/`：Android 应用（Compose UI、前台服务、TCP 接收、本地视觉）
-- `backend/`：Go 后端（Fiber + Redis + Kafka + PostgreSQL）
-- `yolo/`：模型与训练/导出相关资源
-- `ARCHITECTURE.md`：整体架构设计
-- `DEPLOYMENT.md`：部署说明与构建说明
+## 产品定位
 
-## 系统总览
+暖阳智视是一套**轻量可穿戴陪护系统**，目标用户是独居老人和视障人士。核心理念是：
 
-```text
-ESP32-S3 wearable badge  --TCP:8080-->  Android phone (VisionHub)
-                                            |
-                                            | HTTP
-                                            v
-                                      Go backend (:3000)
-                                            |
-                              Redis / Kafka(Redpanda) / PostgreSQL
+- **本地优先**：跌倒检测和药品目标定位全在手机端侧完成，无网络也能响应
+- **语音为主**：所有关键结果通过 TTS 朗读，不要求用户盯屏幕
+- **被动感知**：用户无需主动操作，胸牌持续上报传感器数据，手机后台处理
+
+```
+场景举例：
+ 老人正在厨房，突然跌倒
+   → ESP32 胸牌 IMU 检测到异常加速度
+   → Android 跌倒检测状态机确认
+   → 自动拨打紧急联系人电话
+   → 后端记录跌倒事件（时间 / 位置 / IMU 数值）
 ```
 
-核心链路：
+```
+场景举例：
+ 老人拿着一盒药，不认识药名
+   → 手机摄像头拍照
+   → YOLO 定位药盒区域和文字区域
+   → OCR 读取文字（后续接入云端 API）
+   → LLM 生成用药建议
+   → TTS 朗读给用户听
+```
 
-1. 设备端通过 TCP 向 Android 手机发送传感器 JSON 和 JPEG 图像帧
-2. Android 前台服务接收数据并驱动跌倒检测、本地 YOLO 推理与语音/告警能力
-3. 必要时 Android 或其他客户端接入后端 API 做事件上报与药品识别结果处理
-4. 后端通过 Redis 做缓存、Kafka 做事件流转、PostgreSQL 做持久化
+---
 
-## Android 端能力
+## 整体架构
 
-### 当前已实现
+```
+┌─────────────────────┐         ┌────────────────────────────────────────┐
+│   ESP32-S3 胸牌      │  TCP    │            Android 手机端               │
+│                     │ :8080   │                                        │
+│  IMU (ax/ay/az)     │ ──────▶ │  VisionHubService (前台服务)            │
+│  雷达测距            │         │  ├─ VisionTcpServer  ← TCP 接收        │
+│  摄像头 JPEG         │         │  │    └─ VisionStreamDecoder            │
+│  按钮 A/B            │ ◀────── │  ├─ FallDetectionEngine  状态机        │
+│  蜂鸣器/闪光灯       │ 命令下发 │  ├─ YoloInferenceManager  ONNX 推理   │
+└─────────────────────┘         │  └─ EmergencyCallHandler  紧急拨号     │
+                                 │                                        │
+                                 │  VisionDataHub (状态中枢)               │
+                                 │  Jetpack Compose UI (6 个页面)         │
+                                 └──────────────┬─────────────────────────┘
+                                                │  HTTP (待接入)
+                                                ▼
+                                 ┌──────────────────────────────┐
+                                 │        Go 后端  :3000         │
+                                 │  Fiber v2  REST API           │
+                                 │  ├─ POST /event/report        │
+                                 │  └─ POST /recognize/medicine  │
+                                 └──────┬───────────────┬────────┘
+                                        │               │
+                                 ┌──────▼──────┐  ┌─────▼──────────┐
+                                 │    Redis    │  │  Redpanda       │
+                                 │   (缓存)    │  │  (Kafka 兼容)   │
+                                 └─────────────┘  └─────┬──────────┘
+                                                        │ Consumer
+                                                 ┌──────▼──────────┐
+                                                 │   PostgreSQL    │
+                                                 │  event_logs 表  │
+                                                 └─────────────────┘
+```
 
-- 前台服务常驻运行
-- TCP `8080` 监听设备连接（双向）
-- 混合流解析：
-  - 换行结尾的 JSON 传感器帧
-  - 原始 JPEG 二进制图像帧
-- TCP 命令下发：蜂鸣器（`BUZZER:ON`）、闪光灯（`FLASHLIGHT:TOGGLE`）
-- 跌倒检测状态机
-- 本地 ONNX Runtime 推理
-- Compose 多页面 UI
-- 避障开关、音量调节、跌倒灵敏度切换
-- 拍照识别入口
-- 紧急求助确认弹窗与拨号权限流程
-- **紧急联系人 App 内可编辑，持久化保存**
-- 语音输入查询历史记录（支持关键词过滤）
+---
 
-### 主要 Android 模块
+## 各层详解
 
-- `MainActivity.kt`：应用入口、权限引导、主界面承载
-- `VisionHubService.kt`：前台服务，负责运行期编排
-- `VisionTcpServer.kt`：监听 TCP 连接
-- `VisionStreamDecoder.kt`：解析传感器帧与 JPEG 帧
-- `VisionDataHub.kt`：全局 `StateFlow` / `SharedFlow` 状态中枢
-- `FallDetectionEngine.kt`：跌倒检测状态机
-- `LocalVisionAnalyzer.kt`：本地视觉分析入口
-- `YoloInferenceManager.kt`：ONNX 模型推理与后处理
+### 1. ESP32 设备端
 
-## 后端能力
+胸牌硬件，持续采集传感器数据并通过 TCP 推送到手机。
 
-后端位于 `backend/`，技术栈如下：
+| 传感器 | 用途 |
+|--------|------|
+| IMU (ax/ay/az) | 跌倒检测 |
+| 雷达测距 | 障碍物距离（未来避障语音播报） |
+| 摄像头 | 拍摄 JPEG 图像帧用于药品识别 |
+| 按钮 A/B | 用户主动触发操作（预留） |
 
-- Go
-- Fiber v2
-- GORM
-- Redis
-- Kafka / Redpanda
-- PostgreSQL
+**TCP 发送格式**（同一连接中混合两种帧）：
 
-### 当前接口
+```
+传感器 JSON（以 \n 结尾）：
+{"radar_dist":80,"ax":0.12,"ay":9.81,"az":0.05,"btn_a":0,"btn_b":0}\n
 
-- `GET /healthz`：健康检查
-- `POST /api/v1/event/report`：跌倒事件上报
-- `POST /api/v1/recognize/medicine`：药品识别接口
+图像帧（原始 JPEG 字节，SOI = 0xFF 0xD8，EOI = 0xFF 0xD9）：
+[FF D8 FF ... FF D9]
+```
+
+**Android → ESP32 命令下发**（`VisionTcpServer` 广播，以 `\n` 结尾）：
+
+| 命令 | 触发 | 设备行为 |
+|------|------|--------|
+| `BUZZER:ON\n` | 设备页蜂鸣器按钮 | 蜂鸣器鸣响 |
+| `FLASHLIGHT:TOGGLE\n` | 设备页灯光按钮 | 闪光灯切换 |
+
+---
+
+### 2. Android 手机端
+
+**包结构**：`app/src/main/java/com/example/myapplication/`
+
+#### 服务层（`VisionHubService`）
+
+前台 Service，持有 `WakeLock`，统一编排所有后台逻辑：
+
+```
+VisionHubService
+  ├─ VisionTcpServer          TCP :8080，接受 ESP32 连接
+  │    └─ VisionStreamDecoder 逐字节解析混合流，识别 JSON / JPEG 帧
+  ├─ FallDetectionEngine      基于 IMU 幅值的四状态跌倒状态机
+  │    └─ FallDetectionConfig 运行时热重载（低/中/高灵敏度）
+  ├─ EmergencyCallHandler     跌倒确认后触发 ACTION_CALL
+  └─ LocalVisionAnalyzer
+       └─ YoloInferenceManager ONNX Runtime 本地推理
+```
+
+#### 跌倒检测状态机
+
+```
+IDLE ──(幅值 < freeFallThreshold)──▶ DETECTING
+  ▲                                      │
+  │                             超时(impactWindowMs)
+  │                                      │
+  └──────────────────────────────── 回 IDLE
+                                         │
+                           幅值 ≥ impactThreshold
+                                         │
+                                         ▼
+                               FALL_CONFIRMED ──▶ 触发紧急拨号
+                                         │
+                               进入 COOLDOWN (10s)
+                                         │
+                                    ▶ 回 IDLE
+```
+
+灵敏度预设（可在 App 内切换）：
+
+| 档位 | freeFallThreshold | impactThreshold | 窗口 |
+|------|-------------------|-----------------|------|
+| 低（较难触发） | 3.0 m/s² | 22.0 m/s² | 800ms |
+| 中（默认）     | 2.5 m/s² | 18.0 m/s² | 1000ms |
+| 高（较易触发） | 2.0 m/s² | 14.0 m/s² | 1200ms |
+
+#### 状态中枢（`VisionDataHub`）
+
+全局单例 object，所有状态以 Flow 形式暴露，UI 层直接 `collectAsStateWithLifecycle`：
+
+| Flow | 类型 | 说明 |
+|------|------|------|
+| `connectionState` | `StateFlow` | STOPPED / STARTING / LISTENING / CONNECTED / ERROR |
+| `fallAlertState` | `StateFlow` | IDLE / DETECTING / FALL_CONFIRMED / EMERGENCY_CALLING |
+| `localVisionState` | `StateFlow` | IDLE / PROCESSING / FRAME_ANALYZED / ERROR |
+| `obstacleEnabled` | `StateFlow` | 避障开关（控制是否触发 YOLO 推理） |
+| `fallConfig` | `StateFlow` | 跌倒检测参数，Service 热重载 |
+| `emergencyContact` | `StateFlow` | 紧急联系人号码，持久化至 SharedPreferences |
+| `sensorPackets` | `SharedFlow` | IMU / 雷达传感器数据 |
+| `imageFrames` | `SharedFlow` | JPEG 帧字节（发布前已 `copyOf` 防并发修改） |
+| `deviceCommands` | `SharedFlow` | 下发给 ESP32 的命令字符串 |
+
+#### UI 层（Jetpack Compose）
+
+6 个页面，无 ViewModel，直接读取 VisionDataHub：
+
+| 页面 | 入口 | 主要功能 |
+|------|------|--------|
+| `HomeScreen` | 底栏「首页」 | 实时避障 / 药品识别快捷入口，连接状态 |
+| `ObstacleScreen` | 底栏「避障」 | 避障开关、音量调节、跌倒灵敏度设置 |
+| `RecognitionScreen` | 底栏「识别」 | 拍照触发 YOLO 推理，展示识别结果，TTS 朗读 |
+| `DeviceScreen` | 底栏「设备」 | ESP32 状态、蜂鸣器/灯光命令下发 |
+| `ProfileScreen` | 底栏「我的」 | 用户信息、编辑紧急联系人、设置入口 |
+| `HistoryScreen` | 「我的」浮层 | 事件历史列表，语音搜索关键词过滤 |
+
+持久化（SharedPreferences，同一文件 `visionhub_prefs`）：
+
+| 类 | 存储内容 |
+|----|--------|
+| `VolumePreference` | TTS 音量 |
+| `SensitivityPreference` | 跌倒检测灵敏度 |
+| `ContactPreference` | 紧急联系人电话 |
+
+---
+
+### 3. Go 后端
+
+**目录**：`backend/`，详细文档见 [backend/README.md](backend/README.md)。
+
+```
+POST /api/v1/event/report        跌倒事件上报 → Kafka → PostgreSQL
+POST /api/v1/recognize/medicine  药品识别 → Redis 缓存 → OCR stub → LLM stub
+GET  /healthz                    健康检查
+```
+
+技术栈：Go 1.22 · Fiber v2 · GORM · PostgreSQL 16 · Redis 7 · Redpanda（Kafka 兼容）
+
+---
+
+### 4. AI 模型管线
+
+#### 本地推理（已实现）
+
+```
+JPEG 帧
+  │
+  ▼  YoloInferenceManager（ONNX Runtime）
+  │  1. BitmapFactory 解码 JPEG
+  │  2. 缩放到 640×640
+  │  3. RGB → CHW Float32 Tensor（÷255 归一化）
+  │  4. OrtSession.run()
+  │  5. 后处理：置信度过滤（≥0.35）、类别映射
+  │
+  ├─ Medicine_Box 检测 → 药盒位置
+  └─ Text_Region 检测 → 裁出最高置信度文字区域 → LocalVisionState.summary
+```
+
+模型文件：`app/src/main/assets/yolo11n.onnx`（同时镜像在 `yolo/onnx/yolo11n.onnx`）
+
+#### 云端管线（OCR + LLM，待接入）
+
+```
+Text_Region 裁图（JPEG bytes）
+  │
+  ▼  POST /api/v1/recognize/medicine
+  │
+  ├─ simulateOCR()   ← 当前为 stub，需替换为阿里云/腾讯云 OCR API
+  │    └─ 返回文字字符串
+  │
+  ├─ Redis GET（MD5 缓存键）
+  │    └─ 命中 → 直接返回，节省 LLM 调用
+  │
+  └─ simulateLLM()   ← 当前为 stub，需替换为 Qwen/Claude/GPT-4o
+       └─ 返回用药建议 tts_text → Android TTS 朗读
+```
+
+#### MobileNetV3 特征匹配（规划中）
+
+`yolo/onnx/mobilenet_v3_feat.onnx` + `yolo/special_items.json` 是预留的商品识别管线：
+- YOLO 检出 Medicine_Box 区域后裁图
+- MobileNetV3 提取 embedding
+- 与 `special_items.json` 中的商品特征向量做余弦相似度匹配
+- 识别具体商品（如「相印餐巾纸正面」）
+
+目前**尚未接入**应用运行时，仅留有模型文件和特征数据库。
+
+---
+
+## 数据流
+
+### 跌倒事件完整链路
+
+```
+ESP32 IMU 采样（~50Hz）
+  └─▶ TCP JSON 帧 → VisionStreamDecoder → SensorPacket
+        └─▶ VisionDataHub.sensorPackets（SharedFlow）
+              └─▶ VisionHubService.observeSensorPackets()
+                    └─▶ FallDetectionEngine.process()
+                          ├─ IDLE / DETECTING → 更新 FallAlertState UI
+                          └─ FALL_CONFIRMED
+                                ├─▶ EmergencyCallHandler.triggerEmergencyCall()
+                                │    └─ 拨打 VisionDataHub.emergencyContact 号码
+                                └─▶ [待接入] POST /api/v1/event/report
+                                              └─▶ Kafka → Consumer → PostgreSQL
+```
+
+### 药品识别完整链路
+
+```
+用户点击「拍照识别」
+  └─▶ ActivityResultContracts.TakePicture()
+        └─▶ FileProvider URI → Dispatchers.IO 读取 JPEG bytes
+              └─▶ VisionDataHub.publishImageFrame()
+                    └─▶ VisionHubService.observeImageFrames()
+                          └─▶ [gated: obstacleEnabled]
+                                └─▶ YoloInferenceManager.analyze()
+                                      ├─ ONNX 推理 → Medicine_Box / Text_Region
+                                      └─▶ LocalVisionState（summary 字符串）
+                                            ├─▶ RecognitionScreen 展示
+                                            ├─▶ TTS 朗读
+                                            └─▶ [待接入] POST /recognize/medicine
+                                                          └─▶ OCR → LLM → tts_text
+```
+
+---
+
+## 分支与目录结构
+
+```
+main              基线分支
+android           Android 应用开发分支（当前）
+backend           Go 后端开发分支
+
+仓库目录：
+├── app/                       Android 应用源码
+│   └── src/main/java/com/example/myapplication/
+│       ├── MainActivity.kt        Activity 入口 + 全局 UI 编排
+│       ├── VisionHubService.kt    前台服务
+│       ├── VisionDataHub.kt       全局 Flow 状态中枢
+│       ├── VisionTcpServer.kt     TCP 服务器
+│       ├── VisionStreamDecoder.kt 混合流解析器
+│       ├── FallDetectionEngine.kt 跌倒检测状态机
+│       ├── YoloInferenceManager.kt ONNX 推理
+│       ├── EmergencyCallHandler.kt 紧急拨号
+│       ├── navigation/            页面导航枚举
+│       ├── ui/
+│       │   ├── screens/           6 个页面 Composable
+│       │   ├── components/        可复用 UI 组件
+│       │   ├── AppColors.kt
+│       │   └── AppModels.kt
+│       └── util/                  纯函数辅助 + SharedPreferences
+├── backend/                   Go 后端（见 backend/README.md）
+├── yolo/
+│   ├── onnx/yolo11n.onnx          检测模型（源文件）
+│   ├── onnx/mobilenet_v3_feat.onnx 特征提取模型（规划中）
+│   └── special_items.json         商品特征向量库
+├── ARCHITECTURE.md            系统架构详细文档
+├── DEPLOYMENT.md              构建与部署指南
+└── README.md                  本文件
+```
+
+---
 
 ## 快速开始
 
-## 1. 准备环境
+### 后端（Docker 一键启动）
 
-### Android 构建环境
+```bash
+# 需要 Docker Desktop 运行中
+bash backend/deploy.sh
+```
 
-- JDK 17
-- Android SDK（API 35 / Build Tools 35+）
+健康检查：`curl http://localhost:3000/healthz` → `{"status":"ok"}`
 
-先切到 JDK 17：
+详见 [backend/README.md](backend/README.md)。
+
+### Android APK 构建
 
 ```bash
 export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
+
+./gradlew assembleDebug          # 构建 debug APK
+./gradlew installDebug           # 安装到已连接设备
+./gradlew testDebugUnitTest      # 运行单元测试
 ```
 
-### 后端部署环境
+首次运行时 App 会请求权限：
 
-- Docker >= 24
-- Docker Compose v2
+| 权限 | 用途 |
+|------|------|
+| `POST_NOTIFICATIONS` | 前台服务通知 |
+| `CALL_PHONE` | 跌倒后紧急拨号 |
+| `CAMERA` | 拍照触发药品识别 |
+| `RECORD_AUDIO` | 语音搜索历史记录 |
 
-## 2. 启动后端
+---
 
-复制环境变量：
+## 当前状态
 
-```bash
-cp backend/.env.example backend/.env
-```
+### 已实现
 
-推荐直接使用后端目录内置的一键部署脚本：
+- ESP32 TCP 接入：混合流解析（JSON 传感器帧 + JPEG 图像帧）
+- TCP 命令下发：蜂鸣器 (`BUZZER:ON`) / 闪光灯 (`FLASHLIGHT:TOGGLE`)
+- 跌倒检测状态机（4 状态，3 档灵敏度，运行时热切换）
+- 自动紧急拨号（联系人号码 App 内可编辑 + 持久化）
+- 本地 YOLO 药品目标检测（`Medicine_Box` / `Text_Region`）
+- Compose 全功能 UI（6 页面 + TTS 朗读 + 语音搜索）
+- Go 后端：事件上报 / 药品识别接口 + Kafka 异步持久化 + Redis 缓存
 
-```bash
-bash backend/deploy.sh
-```
+### 待接入
 
-健康检查：
-
-```bash
-curl http://localhost:3000/healthz
-```
-
-默认端口：
-
-- `3000`：后端 HTTP API
-- `5432`：PostgreSQL
-- `6379`：Redis
-- `9092`：Kafka / Redpanda
-
-## 3. 构建 Android APK
-
-```bash
-./gradlew assembleDebug
-```
-
-输出：
-
-- `app/build/outputs/apk/debug/app-debug.apk`
-
-安装到设备：
-
-```bash
-./gradlew installDebug
-```
-
-## 4. 运行测试
-
-```bash
-./gradlew testDebugUnitTest
-./gradlew lintDebug
-```
-
-单测单类运行示例：
-
-```bash
-./gradlew testDebugUnitTest --tests "com.example.myapplication.YoloInferenceManagerTest"
-```
-
-## 首次启动权限
-
-应用首次运行时，按功能会请求以下权限：
-
-- `POST_NOTIFICATIONS`：前台服务通知
-- `CALL_PHONE`：紧急拨号
-- `CAMERA`：拍照识别
-- `RECORD_AUDIO`：语音输入
-
-## TCP 接入说明
-
-Android 应用在设备侧监听 `8080` 端口，支持在同一条 TCP 连接中混合发送：
-
-1. 传感器帧：以换行结尾的 JSON
-2. 图像帧：原始 JPEG 字节流
-
-### 传感器帧示例
-
-```json
-{"radar_dist":80,"ax":0.1,"ay":9.8,"az":0.3,"btn_a":0,"btn_b":0}
-```
-
-### Python 发送示例
-
-```python
-import json
-import socket
-
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.connect(("192.168.x.x", 8080))
-
-frame = {
-    "radar_dist": 80,
-    "ax": 0.1,
-    "ay": 9.8,
-    "az": 0.3,
-    "btn_a": 0,
-    "btn_b": 0,
-}
-
-sock.send((json.dumps(frame) + "\n").encode())
-```
-
-## 常用命令
-
-### Android
-
-```bash
-./gradlew assembleDebug
-./gradlew installDebug
-./gradlew testDebugUnitTest
-./gradlew lintDebug
-./gradlew connectedDebugAndroidTest
-```
-
-### Backend
-
-```bash
-bash backend/deploy.sh
-
-docker compose -f backend/docker-compose.deploy.yml --env-file backend/.env down
-```
-
-## 文档索引
-
-- [ARCHITECTURE.md](ARCHITECTURE.md) — 查看系统分层、依赖关系、数据流
-- [DEPLOYMENT.md](DEPLOYMENT.md) — 查看后端部署、APK 构建、TCP 接入示例
-
-## 当前限制
-
-- OCR/LLM 药品理解链路仍为占位实现（需接入真实 OCR/LLM API）
-- Android 端尚未接入后端 HTTP 接口（跌倒事件上报、药品识别结果同步）
-- TCP 协议当前未做鉴权与应用层确认
-- ESP32 端尚未实现 `BUZZER:ON` / `FLASHLIGHT:TOGGLE` 命令解析
-
-## 分支说明
-
-- `android`：Android 应用开发分支
-- `backend`：后端服务开发分支
-
-如需查看完整架构与部署细节，请优先阅读：
-
-- [ARCHITECTURE.md](ARCHITECTURE.md)
-- [DEPLOYMENT.md](DEPLOYMENT.md)
+| 功能 | 说明 |
+|------|------|
+| 云端 OCR | 替换 `simulateOCR()` stub，接入阿里云/腾讯云 OCR |
+| 云端 LLM | 替换 `simulateLLM()` stub，接入 Qwen/Claude/GPT-4o |
+| Android → 后端 HTTP | 跌倒确认后 POST `/event/report`；识别后 POST `/recognize/medicine` |
+| ESP32 命令解析 | 固件侧实现 `BUZZER:ON` / `FLASHLIGHT:TOGGLE` 响应 |
+| MobileNetV3 商品匹配 | 接入 `mobilenet_v3_feat.onnx` + `special_items.json` 管线 |
+| 设备注册 | `Device` 表对接，替换 `deviceIDFromString` 中的占位 `return 0` |
+| TCP 鉴权 | 应用层握手，防止未授权设备接入 |
