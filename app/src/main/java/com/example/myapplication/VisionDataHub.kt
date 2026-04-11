@@ -19,19 +19,26 @@ object VisionDataHub {
         extraBufferCapacity = 8,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
+    private val mutableDeviceCommands = MutableSharedFlow<String>(
+        extraBufferCapacity = 8,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
     private val mutableConnectionState = MutableStateFlow(ConnectionState.STOPPED)
     private val mutableFallAlertState = MutableStateFlow(FallAlertState.IDLE)
     private val mutableLocalVisionState = MutableStateFlow(LocalVisionState.IDLE)
     private val mutableObstacleEnabled = MutableStateFlow(true)
     private val mutableFallConfig = MutableStateFlow(FallDetectionConfig.DEFAULT)
+    private val mutableEmergencyContact = MutableStateFlow(EmergencyContactConfig.DEFAULT)
 
     val sensorPackets: SharedFlow<SensorPacket> = mutableSensorPackets.asSharedFlow()
     val imageFrames: SharedFlow<ByteArray> = mutableImageFrames.asSharedFlow()
+    val deviceCommands: SharedFlow<String> = mutableDeviceCommands.asSharedFlow()
     val connectionState: StateFlow<ConnectionState> = mutableConnectionState.asStateFlow()
     val fallAlertState: StateFlow<FallAlertState> = mutableFallAlertState.asStateFlow()
     val localVisionState: StateFlow<LocalVisionState> = mutableLocalVisionState.asStateFlow()
     val obstacleEnabled: StateFlow<Boolean> = mutableObstacleEnabled.asStateFlow()
     val fallConfig: StateFlow<FallDetectionConfig> = mutableFallConfig.asStateFlow()
+    val emergencyContact: StateFlow<EmergencyContactConfig> = mutableEmergencyContact.asStateFlow()
 
     fun publishSensorPacket(packet: SensorPacket) {
         mutableSensorPackets.tryEmit(packet)
@@ -65,5 +72,13 @@ object VisionDataHub {
 
     fun updateFallConfig(config: FallDetectionConfig) {
         mutableFallConfig.value = config
+    }
+
+    fun updateEmergencyContact(config: EmergencyContactConfig) {
+        mutableEmergencyContact.value = config
+    }
+
+    fun sendDeviceCommand(command: String) {
+        mutableDeviceCommands.tryEmit(command)
     }
 }

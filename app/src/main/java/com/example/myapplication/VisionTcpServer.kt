@@ -2,6 +2,7 @@ package com.example.myapplication
 
 import java.io.BufferedInputStream
 import java.io.IOException
+import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
@@ -18,11 +19,19 @@ class VisionTcpServer(
 ) {
     private var serverSocket: ServerSocket? = null
     private var acceptJob: Job? = null
+    private var commandJob: Job? = null
     private val clientSockets = ConcurrentHashMap.newKeySet<Socket>()
+    private val clientOutputStreams = ConcurrentHashMap<Socket, OutputStream>()
 
     fun start() {
         if (acceptJob != null) {
             return
+        }
+
+        commandJob = scope.launch {
+            dataHub.deviceCommands.collect { command ->
+                broadcastCommand(command)
+            }
         }
 
         acceptJob = scope.launch {
@@ -56,22 +65,40 @@ class VisionTcpServer(
     }
 
     fun stop() {
+        commandJob?.cancel()
+        commandJob = null
         acceptJob?.cancel()
         acceptJob = null
         clientSockets.forEach { socket -> socket.closeQuietly() }
         clientSockets.clear()
+        clientOutputStreams.clear()
         serverSocket?.closeQuietly()
         serverSocket = null
         dataHub.updateConnectionState(ConnectionState.STOPPED)
     }
 
     private fun readClient(client: Socket) {
-        BufferedInputStream(client.getInputStream()).use { input ->
-            decoder.decode(
-                input = input,
-                onSensorPacket = dataHub::publishSensorPacket,
-                onImageFrame = dataHub::publishImageFrame,
-            )
+        clientOutputStreams[client] = client.getOutputStream()
+        try {
+            BufferedInputStream(client.getInputStream()).use { input ->
+                decoder.decode(
+                    input = input,
+                    onSensorPacket = dataHub::publishSensorPacket,
+                    onImageFrame = dataHub::publishImageFrame,
+                )
+            }
+        } finally {
+            clientOutputStreams.remove(client)
+        }
+    }
+
+    private fun broadcastCommand(command: String) {
+        val bytes = (command + "\n").toByteArray(Charsets.UTF_8)
+        clientOutputStreams.values.forEach { stream ->
+            runCatching {
+                stream.write(bytes)
+                stream.flush()
+            }
         }
     }
 

@@ -27,64 +27,33 @@ cp backend/.env.example backend/.env
 
 ### 1.3 Docker Compose 一键启动
 
-在仓库根目录创建 `docker-compose.yml`：
+后端目录已提供一键部署脚本与 compose 文件：
 
-```yaml
-version: "3.9"
+- `backend/deploy.sh`
+- `backend/docker-compose.deploy.yml`
+- `backend/Dockerfile`
 
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: visionhub
-      POSTGRES_PASSWORD: visionhub
-      POSTGRES_DB: visionhub
-    ports:
-      - "5432:5432"
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  # Redpanda — Kafka-compatible，单节点，无需 ZooKeeper
-  redpanda:
-    image: redpandadata/redpanda:latest
-    command:
-      - redpanda start
-      - --node-id 0
-      - --kafka-addr PLAINTEXT://0.0.0.0:9092
-      - --advertise-kafka-addr PLAINTEXT://redpanda:9092
-      - --smp 1
-      - --memory 512M
-    ports:
-      - "9092:9092"
-
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    environment:
-      APP_PORT: "3000"
-      DATABASE_URL: "postgres://visionhub:visionhub@postgres:5432/visionhub?sslmode=disable"
-      REDIS_ADDR: "redis:6379"
-      KAFKA_BROKERS: "redpanda:9092"
-      KAFKA_TOPIC: "sensor_events"
-    ports:
-      - "3000:3000"
-    depends_on:
-      - postgres
-      - redis
-      - redpanda
-
-volumes:
-  pg_data:
-```
+首次启动：
 
 ```bash
-docker compose up -d
+bash backend/deploy.sh
+```
+
+脚本会自动：
+
+1. 检查 Docker / Docker Compose 是否可用
+2. 若 `backend/.env` 不存在，则从 `backend/.env.example` 复制
+3. 自动把容器内地址改写为：
+   - `DATABASE_URL=postgres://visionhub:visionhub@postgres:5432/visionhub?sslmode=disable`
+   - `REDIS_ADDR=redis:6379`
+   - `KAFKA_BROKERS=redpanda:9092`
+4. 执行 `docker compose up -d --build`
+5. 轮询 `http://localhost:3000/healthz` 直到服务可用
+
+如需手动执行，对应命令为：
+
+```bash
+docker compose -f backend/docker-compose.deploy.yml --env-file backend/.env up -d --build
 ```
 
 健康检查：
@@ -93,7 +62,43 @@ curl http://localhost:3000/healthz
 # {"status":"ok"}
 ```
 
-### 1.4 后端 Dockerfile
+接口冒烟测试：
+```bash
+# 跌倒事件上报
+curl -s -X POST http://localhost:3000/api/v1/event/report \
+  -H "Content-Type: application/json" \
+  -d '{"device_id":"badge-001","imu_magnitude":15.3,"latitude":31.23,"longitude":121.47}'
+# {"message":"fall event queued","success":true}
+
+# 药品识别（OCR/LLM 当前为 stub）
+curl -s -X POST http://localhost:3000/api/v1/recognize/medicine \
+  -H "Content-Type: application/json" \
+  -d '{"device_id":"badge-001","image_base64":"<base64>"}'
+# {"success":true,"data":{"tts_text":"...","cached":false}}
+```
+
+查看持久化结果（PostgreSQL）：
+```bash
+docker exec visionhub-postgres psql -U visionhub -d visionhub \
+  -c "SELECT id, device_id, event_type, detail, created_at FROM event_logs ORDER BY created_at DESC LIMIT 10;"
+```
+
+停止服务：
+
+```bash
+docker compose -f backend/docker-compose.deploy.yml --env-file backend/.env down
+```
+
+### 1.4 Compose 内容说明
+
+`backend/docker-compose.deploy.yml` 会启动以下服务：
+
+- `postgres`：PostgreSQL 16
+- `redis`：Redis 7
+- `redpanda`：Kafka 兼容消息队列
+- `backend`：Go Fiber 服务
+
+### 1.5 后端 Dockerfile
 
 在 `backend/` 目录创建 `Dockerfile`：
 

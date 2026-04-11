@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -39,8 +40,8 @@ func main() {
 	// ── Fiber app ──────────────────────────────────────────────────────────
 	app := fiber.New(fiber.Config{
 		AppName:      "VisionHub Backend v1",
-		ReadTimeout:  30,
-		WriteTimeout: 30,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
 		ErrorHandler: jsonErrorHandler,
 	})
 

@@ -55,8 +55,10 @@ ESP32-S3 wearable badge          Android phone (compute hub)         Cloud backe
 │       ├─ StateFlow<LocalVisionState>                 │
 │       ├─ StateFlow<Boolean>  obstacleEnabled         │
 │       ├─ StateFlow<FallDetectionConfig>  fallConfig  │
+│       ├─ StateFlow<EmergencyContactConfig>           │
 │       ├─ SharedFlow<SensorPacket>                    │
-│       └─ SharedFlow<ByteArray>  (JPEG 帧)            │
+│       ├─ SharedFlow<ByteArray>  (JPEG 帧)            │
+│       └─ SharedFlow<String>  deviceCommands          │
 ├─────────────────────────────────────────────────────┤
 │  Service 层  (Dispatchers.IO · SupervisorJob)         │
 │  └── VisionHubService  (前台服务)                     │
@@ -80,6 +82,8 @@ ESP32-S3 wearable badge          Android phone (compute hub)         Cloud backe
 | `util/UiStateHelpers.kt` | 纯 Kotlin 状态→字符串辅助函数 |
 | `util/VolumePreference.kt` | SharedPreferences 持久化音量 |
 | `util/SensitivityPreference.kt` | SharedPreferences 持久化灵敏度 + 预设值 |
+| `util/ContactPreference.kt` | SharedPreferences 持久化紧急联系人号码 |
+| `util/UiStateHelpers.kt` | 纯 Kotlin 状态→字符串辅助函数，含 `filterHistoryRecords` |
 
 ---
 
@@ -113,7 +117,9 @@ Kafka Consumer (goroutine)
 
 ---
 
-## 4. TCP 流协议 (设备 → Android)
+## 4. TCP 流协议
+
+### 设备 → Android（入方向）
 
 同一 TCP 连接上交织两种帧，无应用层帧头：
 
@@ -131,6 +137,17 @@ Kafka Consumer (goroutine)
 | `radar_dist` | Int | 雷达距离 (cm) |
 | `ax` `ay` `az` | Double | IMU 加速度 (m/s²) |
 | `btn_a` `btn_b` | Int | 按钮状态 (0/1) |
+
+### Android → 设备（出方向，命令下发）
+
+`VisionDataHub.sendDeviceCommand(command)` 将命令字符串写入 `deviceCommands` SharedFlow，`VisionTcpServer` 订阅后广播给所有已连接客户端（追加 `\n`）。
+
+当前已定义命令：
+
+| 命令字符串 | 触发入口 | 设备行为 |
+|-----------|---------|--------|
+| `BUZZER:ON` | 设备页 → 蜂鸣器按钮 | 蜂鸣器鸣响 |
+| `FLASHLIGHT:TOGGLE` | 设备页 → 灯光按钮 | 闪光灯切换 |
 
 ---
 
@@ -151,6 +168,8 @@ graph TD
     YIM --> ONNX[(yolo11n.onnx)]
     VDH -->|fallConfig flow| FDE
     VDH -->|obstacleEnabled| VHS
+    VDH -->|deviceCommands flow| VTS
+    VDH -->|emergencyContact| VHS
 ```
 
 ---

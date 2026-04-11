@@ -1,10 +1,14 @@
 package com.example.myapplication
 
+import androidx.compose.ui.graphics.Color
+import com.example.myapplication.ui.HistoryRecord
 import com.example.myapplication.util.connectionStatusText
 import com.example.myapplication.util.fallAlertDescription
 import com.example.myapplication.util.fallAlertTitle
+import com.example.myapplication.util.filterHistoryRecords
 import com.example.myapplication.util.localVisionStatusText
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExampleUnitTest {
@@ -61,6 +65,66 @@ class ExampleUnitTest {
         assertEquals(
             "已检测到跌倒，请立即查看佩戴者状态。",
             fallAlertDescription(FallAlertState.FALL_CONFIRMED),
+        )
+    }
+
+    @Test
+    fun `filterHistoryRecords returns all records for blank query`() {
+        val records = sampleHistoryRecords()
+
+        assertEquals(records, filterHistoryRecords(records, "   "))
+    }
+
+    @Test
+    fun `filterHistoryRecords matches title detail and time`() {
+        val records = sampleHistoryRecords()
+
+        val titleMatches = filterHistoryRecords(records, "药品")
+        val detailMatches = filterHistoryRecords(records, "跌倒")
+        val timeMatches = filterHistoryRecords(records, "10月24日")
+
+        assertEquals(listOf(records[0]), titleMatches)
+        assertEquals(listOf(records[1]), detailMatches)
+        assertEquals(listOf(records[1]), timeMatches)
+    }
+
+    @Test
+    fun `filterHistoryRecords ignores case`() {
+        val records = listOf(
+            HistoryRecord(
+                title = "Medicine Box",
+                detail = "Vitamin C",
+                time = "Today 10:30",
+                accent = Color.Yellow,
+            ),
+        )
+
+        val result = filterHistoryRecords(records, "medicine")
+
+        assertEquals(records, result)
+    }
+
+    @Test
+    fun `filterHistoryRecords returns empty list when nothing matches`() {
+        val result = filterHistoryRecords(sampleHistoryRecords(), "语音设置")
+
+        assertTrue(result.isEmpty())
+    }
+
+    private fun sampleHistoryRecords(): List<HistoryRecord> {
+        return listOf(
+            HistoryRecord(
+                title = "药品识别",
+                detail = "识别摘要：阿司匹林",
+                time = "今天 10:30",
+                accent = Color.Yellow,
+            ),
+            HistoryRecord(
+                title = "跌倒提醒",
+                detail = "已检测到跌倒，请立即查看佩戴者状态。",
+                time = "10月24日 08:20",
+                accent = Color.Red,
+            ),
         )
     }
 }

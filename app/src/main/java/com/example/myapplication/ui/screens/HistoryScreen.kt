@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Visibility
@@ -38,9 +39,11 @@ import com.example.myapplication.ui.components.TopCircleButton
 @Composable
 internal fun HistoryScreen(
     historyRecords: List<HistoryRecord>,
+    historyQuery: String,
     onBack: () -> Unit,
     onOpenObstacle: () -> Unit,
     onVoiceInput: () -> Unit = {},
+    onClearQuery: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -89,6 +92,27 @@ internal fun HistoryScreen(
                 )
             }
         }
+        if (historyQuery.isNotBlank()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "当前筛选：$historyQuery",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = PrimaryText,
+                    )
+                    TopCircleButton(
+                        icon = Icons.Filled.Close,
+                        contentDescription = "清除筛选",
+                        onClick = onClearQuery,
+                    )
+                }
+            }
+        }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -96,7 +120,7 @@ internal fun HistoryScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "识别历史",
+                    text = if (historyQuery.isBlank()) "识别历史" else "筛选结果",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = PrimaryText,
@@ -109,13 +133,27 @@ internal fun HistoryScreen(
                 )
             }
         }
-        items(historyRecords) { record ->
-            HistoryRecordCard(record = record)
+        if (historyRecords.isEmpty()) {
+            item {
+                Text(
+                    text = "没有找到与“$historyQuery”相关的历史记录",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = SecondaryText,
+                )
+            }
+        } else {
+            items(
+                items = historyRecords,
+                key = { record -> "${record.time}-${record.title}-${record.detail}" },
+            ) { record ->
+                HistoryRecordCard(record = record)
+            }
         }
         item {
             SecondaryWideButton(
-                title = "查看更多历史记录",
-                icon = Icons.Filled.ChevronRight,
+                title = if (historyQuery.isBlank()) "查看更多历史记录" else "重新语音查询",
+                icon = if (historyQuery.isBlank()) Icons.Filled.ChevronRight else Icons.Filled.Mic,
+                onClick = if (historyQuery.isBlank()) onOpenObstacle else onVoiceInput,
             )
         }
         item {

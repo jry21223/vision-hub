@@ -1,6 +1,7 @@
 package com.example.myapplication
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
@@ -36,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,11 +74,15 @@ import com.example.myapplication.util.VolumePreference
 import com.example.myapplication.util.connectionStatusText
 import com.example.myapplication.util.fallAlertDescription
 import com.example.myapplication.util.fallAlertTitle
+import com.example.myapplication.util.filterHistoryRecords
 import com.example.myapplication.util.guardianLocationText
 import com.example.myapplication.util.historyDetail
 import com.example.myapplication.util.historyTitle
 import com.example.myapplication.util.obstacleGuidance
+import com.example.myapplication.util.ContactPreference
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -138,17 +144,17 @@ internal fun VisionHubScreen(
     val coroutineScope = rememberCoroutineScope()
     val fallConfig by VisionDataHub.fallConfig.collectAsStateWithLifecycle()
 
-    // ── Navigation ──────────────────────────────────────────────────────────
+    LaunchedEffect(Unit) {
+        VisionDataHub.updateEmergencyContact(ContactPreference.load(context))
+    }
+
     var currentDestination by rememberSaveable { mutableStateOf(VisionHubDestination.HOME) }
-
-    // ── Volume (lifted from ObstacleScreen) ─────────────────────────────────
     var volume by rememberSaveable { mutableFloatStateOf(VolumePreference.load(context)) }
-
-    // ── Dialog / sheet visibility ────────────────────────────────────────────
     var showEmergencyDialog by remember { mutableStateOf(false) }
     var showSensitivitySheet by remember { mutableStateOf(false) }
+    var historyQuery by rememberSaveable { mutableStateOf("") }
+    var speechLaunchError by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // ── TTS engine ───────────────────────────────────────────────────────────
     var ttsEngine: TextToSpeech? by remember { mutableStateOf(null) }
     DisposableEffect(Unit) {
         var tts: TextToSpeech? = null
@@ -161,7 +167,6 @@ internal fun VisionHubScreen(
         onDispose { tts?.shutdown() }
     }
 
-    // ── Camera ───────────────────────────────────────────────────────────────
     var captureUri by remember { mutableStateOf<android.net.Uri?>(null) }
     val cameraLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
@@ -169,7 +174,11 @@ internal fun VisionHubScreen(
         if (success) {
             captureUri?.let { uri ->
                 coroutineScope.launch {
-                    val bytes = context.contentResolver.openInputStream(uri)?.readBytes()
+                    val bytes = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                            inputStream.readBytes()
+                        }
+                    }
                     if (bytes != null) VisionDataHub.publishImageFrame(bytes)
                 }
             }
@@ -186,19 +195,26 @@ internal fun VisionHubScreen(
         }
     }
 
-    // ── Call permission ───────────────────────────────────────────────────────
     val callPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) EmergencyCallHandler().triggerEmergencyCall(context)
+        if (granted) EmergencyCallHandler(config = VisionDataHub.emergencyContact.value).triggerEmergencyCall(context)
     }
 
-    // ── Speech recognizer ─────────────────────────────────────────────────────
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { /* voice query results — future: filter history */ }
+    ) { result ->
+        val query = result.data
+            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+            ?.trim()
+            .orEmpty()
+        if (query.isNotBlank()) {
+            historyQuery = query
+            currentDestination = VisionHubDestination.HISTORY
+        }
+    }
 
-    // ── History data ─────────────────────────────────────────────────────────
     val historyRecords = remember(fallAlertState, connectionState, localVisionState) {
         listOf(
             HistoryRecord(
@@ -239,8 +255,10 @@ internal fun VisionHubScreen(
             ),
         )
     }
+    val filteredHistoryRecords = remember(historyRecords, historyQuery) {
+        filterHistoryRecords(historyRecords, historyQuery)
+    }
 
-    // ── Shared action lambdas ─────────────────────────────────────────────────
     val onEmergencyHelp: () -> Unit = { showEmergencyDialog = true }
 
     val onVolumeChange: (Float) -> Unit = { newValue ->
@@ -276,11 +294,24 @@ internal fun VisionHubScreen(
             putExtra(RecognizerIntent.EXTRA_PROMPT, "请说出要查询的药品或日期")
         }
         try {
+            speechLaunchError = null
             speechLauncher.launch(intent)
-        } catch (_: Exception) { /* device may not have speech recognition */ }
+        } catch (_: ActivityNotFoundException) {
+            speechLaunchError = "当前设备不支持语音识别"
+        }
     }
 
-    // ── Dialogs / sheets ──────────────────────────────────────────────────────
+    if (speechLaunchError != null) {
+        AlertDialog(
+            onDismissRequest = { speechLaunchError = null },
+            title = { Text("无法启动语音输入") },
+            text = { Text(speechLaunchError ?: "") },
+            confirmButton = {
+                TextButton(onClick = { speechLaunchError = null }) { Text("知道了") }
+            },
+        )
+    }
+
     if (showEmergencyDialog) {
         AlertDialog(
             onDismissRequest = { showEmergencyDialog = false },
@@ -293,7 +324,7 @@ internal fun VisionHubScreen(
                         context, Manifest.permission.CALL_PHONE,
                     ) == PackageManager.PERMISSION_GRANTED
                     if (hasPermission) {
-                        EmergencyCallHandler().triggerEmergencyCall(context)
+                        EmergencyCallHandler(config = VisionDataHub.emergencyContact.value).triggerEmergencyCall(context)
                     } else {
                         callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
                     }
@@ -322,7 +353,6 @@ internal fun VisionHubScreen(
         }
     }
 
-    // ── Navigation scaffold ───────────────────────────────────────────────────
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = ScreenBackground,
@@ -374,7 +404,10 @@ internal fun VisionHubScreen(
             )
             VisionHubDestination.RECOGNITION -> RecognitionScreen(
                 localVisionState = localVisionState,
-                onOpenHistory = { currentDestination = VisionHubDestination.HISTORY },
+                onOpenHistory = {
+                    historyQuery = ""
+                    currentDestination = VisionHubDestination.HISTORY
+                },
                 onCaptureClick = onCaptureClick,
                 onSpeakResult = onSpeakResult,
                 modifier = Modifier.padding(innerPadding),
@@ -382,12 +415,15 @@ internal fun VisionHubScreen(
             VisionHubDestination.DEVICE -> DeviceScreen(
                 connectionState = connectionState,
                 fallAlertState = fallAlertState,
-                onBuzzer = { /* future: send TCP command to ESP32 */ },
-                onFlashlight = { /* future: send TCP command to ESP32 */ },
+                onBuzzer = { VisionDataHub.sendDeviceCommand("BUZZER:ON") },
+                onFlashlight = { VisionDataHub.sendDeviceCommand("FLASHLIGHT:TOGGLE") },
                 modifier = Modifier.padding(innerPadding),
             )
             VisionHubDestination.PROFILE -> ProfileScreen(
-                onOpenHistory = { currentDestination = VisionHubDestination.HISTORY },
+                onOpenHistory = {
+                    historyQuery = ""
+                    currentDestination = VisionHubDestination.HISTORY
+                },
                 onVoiceSettings = { /* future: voice engine settings screen */ },
                 onObstacleSensitivity = { showSensitivitySheet = true },
                 onModelConfig = { /* future: model configuration screen */ },
@@ -395,10 +431,12 @@ internal fun VisionHubScreen(
                 modifier = Modifier.padding(innerPadding),
             )
             VisionHubDestination.HISTORY -> HistoryScreen(
-                historyRecords = historyRecords,
+                historyRecords = filteredHistoryRecords,
+                historyQuery = historyQuery,
                 onBack = { currentDestination = VisionHubDestination.PROFILE },
                 onOpenObstacle = { currentDestination = VisionHubDestination.OBSTACLE },
                 onVoiceInput = onVoiceInput,
+                onClearQuery = { historyQuery = "" },
                 modifier = Modifier.padding(innerPadding),
             )
         }

@@ -13,3 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+.ace-tool/
+backend/.env

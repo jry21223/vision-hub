@@ -41,17 +41,19 @@ ESP32-S3 wearable badge  --TCP:8080-->  Android phone (VisionHub)
 ### 当前已实现
 
 - 前台服务常驻运行
-- TCP `8080` 监听设备连接
+- TCP `8080` 监听设备连接（双向）
 - 混合流解析：
   - 换行结尾的 JSON 传感器帧
   - 原始 JPEG 二进制图像帧
+- TCP 命令下发：蜂鸣器（`BUZZER:ON`）、闪光灯（`FLASHLIGHT:TOGGLE`）
 - 跌倒检测状态机
 - 本地 ONNX Runtime 推理
 - Compose 多页面 UI
 - 避障开关、音量调节、跌倒灵敏度切换
 - 拍照识别入口
 - 紧急求助确认弹窗与拨号权限流程
-- 语音输入入口
+- **紧急联系人 App 内可编辑，持久化保存**
+- 语音输入查询历史记录（支持关键词过滤）
 
 ### 主要 Android 模块
 
@@ -110,10 +112,10 @@ export PATH="$JAVA_HOME/bin:$PATH"
 cp backend/.env.example backend/.env
 ```
 
-然后在仓库根目录按 `DEPLOYMENT.md` 中的示例准备 `docker-compose.yml`，启动：
+推荐直接使用后端目录内置的一键部署脚本：
 
 ```bash
-docker compose up -d
+bash backend/deploy.sh
 ```
 
 健康检查：
@@ -216,8 +218,9 @@ sock.send((json.dumps(frame) + "\n").encode())
 ### Backend
 
 ```bash
-docker compose up -d
-docker compose down
+bash backend/deploy.sh
+
+docker compose -f backend/docker-compose.deploy.yml --env-file backend/.env down
 ```
 
 ## 文档索引
@@ -227,10 +230,10 @@ docker compose down
 
 ## 当前限制
 
-- OCR/LLM 药品理解链路仍为占位实现
-- 设备页部分能力仍是预留入口
+- OCR/LLM 药品理解链路仍为占位实现（需接入真实 OCR/LLM API）
+- Android 端尚未接入后端 HTTP 接口（跌倒事件上报、药品识别结果同步）
 - TCP 协议当前未做鉴权与应用层确认
-- 紧急联系人配置仍未开放为 App 内可编辑项
+- ESP32 端尚未实现 `BUZZER:ON` / `FLASHLIGHT:TOGGLE` 命令解析
 
 ## 分支说明
 

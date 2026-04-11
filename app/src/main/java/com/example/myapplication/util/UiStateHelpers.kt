@@ -10,6 +10,7 @@ import com.example.myapplication.FallAlertState
 import com.example.myapplication.LocalVisionState
 import com.example.myapplication.LocalVisionStatus
 import com.example.myapplication.ui.DangerRed
+import com.example.myapplication.ui.HistoryRecord
 import com.example.myapplication.ui.StatMetric
 import com.example.myapplication.ui.WarmYellowDark
 
@@ -140,6 +141,21 @@ internal fun historyDetail(localVisionState: LocalVisionState): String =
         LocalVisionStatus.ERROR -> localVisionState.summary
         LocalVisionStatus.IDLE -> "等待图像帧"
     }
+
+internal fun filterHistoryRecords(
+    historyRecords: List<HistoryRecord>,
+    query: String,
+): List<HistoryRecord> {
+    val normalizedQuery = query.trim()
+    if (normalizedQuery.isBlank()) {
+        return historyRecords
+    }
+    return historyRecords.filter { record ->
+        record.title.contains(normalizedQuery, ignoreCase = true) ||
+            record.detail.contains(normalizedQuery, ignoreCase = true) ||
+            record.time.contains(normalizedQuery, ignoreCase = true)
+    }
+}
 
 internal fun deviceBannerTitle(connectionState: ConnectionState): String =
     if (connectionState == ConnectionState.CONNECTED) {

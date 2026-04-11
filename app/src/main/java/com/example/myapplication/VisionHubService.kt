@@ -19,7 +19,6 @@ class VisionHubService : Service() {
 
     @Volatile
     private var fallDetectionEngine = FallDetectionEngine()
-    private val emergencyCallHandler = EmergencyCallHandler()
     private val localVisionAnalyzer = LocalVisionAnalyzer()
     private val tcpServer = VisionTcpServer(
         scope = serviceScope,
@@ -98,7 +97,8 @@ class VisionHubService : Service() {
                 }
                 VisionDataHub.updateFallAlertState(fallAlertState)
                 if (outcome.shouldTriggerEmergency) {
-                    val didStartCall = emergencyCallHandler.triggerEmergencyCall(this@VisionHubService)
+                    val handler = EmergencyCallHandler(config = VisionDataHub.emergencyContact.value)
+                    val didStartCall = handler.triggerEmergencyCall(this@VisionHubService)
                     val nextState = if (didStartCall) {
                         FallAlertState.EMERGENCY_CALLING
                     } else {
