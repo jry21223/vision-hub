@@ -79,7 +79,11 @@ import com.example.myapplication.util.guardianLocationText
 import com.example.myapplication.util.historyDetail
 import com.example.myapplication.util.historyTitle
 import com.example.myapplication.util.obstacleGuidance
+import android.util.Log
+
 import com.example.myapplication.util.ContactPreference
+import com.example.myapplication.util.UserPreference
+import com.example.myapplication.api.RetrofitClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -145,7 +149,47 @@ internal fun VisionHubScreen(
     val fallConfig by VisionDataHub.fallConfig.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
-        VisionDataHub.updateEmergencyContact(ContactPreference.load(context))
+        // 加载紧急联系人（SharedPreferences 在 IO 线程读取）
+        val savedContact = withContext(Dispatchers.IO) {
+            ContactPreference.load(context)
+        }
+        VisionDataHub.updateEmergencyContact(savedContact)
+
+        // 加载用户档案（SharedPreferences 在 IO 线程读取）
+        val profile = withContext(Dispatchers.IO) {
+            var p = UserPreference.load(context)
+            if (p.userId.isBlank()) {
+                p = p.copy(userId = UserPreference.generateUserId())
+                UserPreference.save(context, p)
+            }
+            p
+        }
+        VisionDataHub.updateUserProfile(profile)
+
+        // 尝试从后端同步用户档案（仅在需要时）
+        coroutineScope.launch {
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    RetrofitClient.userProfileApi.getUserProfile(profile.userId)
+                }
+                if (response.isSuccessful) {
+                    val body = response.body()
+                    if (body?.success == true && body.data != null) {
+                        val serverProfile = UserProfile(
+                            userId = profile.userId,
+                            displayName = body.data.displayName,
+                            avatarInitial = body.data.avatarInitial,
+                        )
+                        VisionDataHub.updateUserProfile(serverProfile)
+                        withContext(Dispatchers.IO) {
+                            UserPreference.save(context, serverProfile)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Failed to sync user profile from server", e)
+            }
+        }
     }
 
     var currentDestination by rememberSaveable { mutableStateOf(VisionHubDestination.HOME) }
@@ -415,8 +459,8 @@ internal fun VisionHubScreen(
             VisionHubDestination.DEVICE -> DeviceScreen(
                 connectionState = connectionState,
                 fallAlertState = fallAlertState,
-                onBuzzer = { VisionDataHub.sendDeviceCommand("BUZZER:ON") },
-                onFlashlight = { VisionDataHub.sendDeviceCommand("FLASHLIGHT:TOGGLE") },
+                onBuzzer = { VisionDataHub.sendDeviceCommand(DeviceCommand.BUZZER_ON) },
+                onFlashlight = { VisionDataHub.sendDeviceCommand(DeviceCommand.FLASHLIGHT_TOGGLE) },
                 modifier = Modifier.padding(innerPadding),
             )
             VisionHubDestination.PROFILE -> ProfileScreen(

@@ -1,5 +1,6 @@
 package com.example.myapplication
 
+import android.util.Log
 import java.io.BufferedInputStream
 import java.io.IOException
 import java.io.OutputStream
@@ -94,12 +95,17 @@ class VisionTcpServer(
 
     private fun broadcastCommand(command: String) {
         val bytes = (command + "\n").toByteArray(Charsets.UTF_8)
-        clientOutputStreams.values.forEach { stream ->
+        val deadClients = mutableListOf<Socket>()
+        clientOutputStreams.forEach { (client, stream) ->
             runCatching {
                 stream.write(bytes)
                 stream.flush()
+            }.onFailure { e ->
+                Log.w(TAG, "Failed to send command to client ${client.inetAddress}, removing", e)
+                deadClients.add(client)
             }
         }
+        deadClients.forEach { clientOutputStreams.remove(it) }
     }
 
     private fun ServerSocket.closeQuietly() {
@@ -119,5 +125,6 @@ class VisionTcpServer(
     companion object {
         const val DEFAULT_PORT = 8080
         private const val CLIENT_SOCKET_TIMEOUT_MILLIS = 10_000
+        private const val TAG = "VisionTcpServer"
     }
 }

@@ -30,16 +30,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.myapplication.ui.CardBackground
 import com.example.myapplication.ui.HistoryRecord
+import androidx.compose.foundation.clickable
 import com.example.myapplication.ui.PrimaryText
 import com.example.myapplication.ui.ProfileBlue
 import com.example.myapplication.ui.SecondaryText
 import com.example.myapplication.ui.WarmYellow
 
 @Composable
-internal fun ProfileHeroCard() {
+internal fun ProfileHeroCard(
+    displayName: String,
+    userId: String,
+    avatarInitial: String,
+    onClick: () -> Unit = {},
+) {
     Card(
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = CardBackground),
+        modifier = Modifier.clickable(onClick = onClick),
     ) {
         Row(
             modifier = Modifier
@@ -55,7 +62,7 @@ internal fun ProfileHeroCard() {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "林",
+                    text = avatarInitial,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Black,
                     color = Color.White,
@@ -64,13 +71,13 @@ internal fun ProfileHeroCard() {
             Spacer(modifier = Modifier.width(14.dp))
             Column {
                 Text(
-                    text = "林奶奶",
+                    text = displayName,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Black,
                     color = PrimaryText,
                 )
                 Text(
-                    text = "ID: WS-2024-8892",
+                    text = "ID: $userId",
                     style = MaterialTheme.typography.titleMedium,
                     color = SecondaryText,
                 )

@@ -29,6 +29,7 @@ object VisionDataHub {
     private val mutableObstacleEnabled = MutableStateFlow(true)
     private val mutableFallConfig = MutableStateFlow(FallDetectionConfig.DEFAULT)
     private val mutableEmergencyContact = MutableStateFlow(EmergencyContactConfig.DEFAULT)
+    private val mutableUserProfile = MutableStateFlow(UserProfile())
 
     val sensorPackets: SharedFlow<SensorPacket> = mutableSensorPackets.asSharedFlow()
     val imageFrames: SharedFlow<ByteArray> = mutableImageFrames.asSharedFlow()
@@ -39,6 +40,7 @@ object VisionDataHub {
     val obstacleEnabled: StateFlow<Boolean> = mutableObstacleEnabled.asStateFlow()
     val fallConfig: StateFlow<FallDetectionConfig> = mutableFallConfig.asStateFlow()
     val emergencyContact: StateFlow<EmergencyContactConfig> = mutableEmergencyContact.asStateFlow()
+    val userProfile: StateFlow<UserProfile> = mutableUserProfile.asStateFlow()
 
     fun publishSensorPacket(packet: SensorPacket) {
         mutableSensorPackets.tryEmit(packet)
@@ -81,4 +83,20 @@ object VisionDataHub {
     fun sendDeviceCommand(command: String) {
         mutableDeviceCommands.tryEmit(command)
     }
+
+    fun sendDeviceCommand(command: DeviceCommand) {
+        sendDeviceCommand(command.commandString)
+    }
+
+    fun updateUserProfile(profile: UserProfile) {
+        mutableUserProfile.value = profile
+    }
+}
+
+/**
+ * Type-safe device commands sent to the ESP32 badge.
+ */
+enum class DeviceCommand(val commandString: String) {
+    BUZZER_ON("BUZZER:ON"),
+    FLASHLIGHT_TOGGLE("FLASHLIGHT:TOGGLE"),
 }

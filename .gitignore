@@ -15,3 +15,8 @@
 local.properties
 .ace-tool/
 backend/.env
+
+# 签名密钥库（安全敏感，不要提交）
+*.keystore
+*.jks
+!debug.keystore
