@@ -466,8 +466,12 @@ internal fun VisionHubScreen(
             VisionHubDestination.DEVICE -> DeviceScreen(
                 connectionState = connectionState,
                 fallAlertState = fallAlertState,
-                onBuzzer = { VisionDataHub.sendDeviceCommand(DeviceCommand.BUZZER_ON) },
-                onFlashlight = { VisionDataHub.sendDeviceCommand(DeviceCommand.FLASHLIGHT_TOGGLE) },
+                onBuzzer = {
+                    ttsEngine?.speak("正在发出蜂鸣提示", TextToSpeech.QUEUE_FLUSH, null, null)
+                },
+                onFlashlight = {
+                    ttsEngine?.speak("手电筒已开启", TextToSpeech.QUEUE_FLUSH, null, null)
+                },
                 modifier = Modifier.padding(innerPadding),
             )
             VisionHubDestination.PROFILE -> ProfileScreen(

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"SensitivityPreference\\\\|VolumePreference\" /Users/jerry/Desktop/4c/app/src/main/java/com/example/myapplication/util/*.kt)"
+    ]
+  }
+}
