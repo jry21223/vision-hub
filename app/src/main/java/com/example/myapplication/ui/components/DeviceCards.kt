@@ -207,9 +207,27 @@ internal fun GuardianLocationCard(connectionState: ConnectionState) {
 @Composable
 internal fun FinderCard(
     fallAlertState: FallAlertState,
+    connectionState: ConnectionState,
     onBuzzer: () -> Unit = {},
     onFlashlight: () -> Unit = {},
 ) {
+    var showNotConnectedDialog by remember { mutableStateOf(false) }
+
+    if (showNotConnectedDialog) {
+        AlertDialog(
+            onDismissRequest = { showNotConnectedDialog = false },
+            title = { Text("设备未连接") },
+            text = { Text("请先连接 ESP32 设备后再使用此功能。") },
+            confirmButton = {
+                TextButton(onClick = { showNotConnectedDialog = false }) {
+                    Text("知道了")
+                }
+            },
+        )
+    }
+
+    val isConnected = connectionState == ConnectionState.CONNECTED
+
     Card(
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceSoft),
@@ -235,13 +253,25 @@ internal fun FinderCard(
                 FinderOptionCard(
                     title = "蜂鸣器",
                     icon = Icons.AutoMirrored.Filled.VolumeUp,
-                    onClick = onBuzzer,
+                    onClick = {
+                        if (isConnected) {
+                            onBuzzer()
+                        } else {
+                            showNotConnectedDialog = true
+                        }
+                    },
                     modifier = Modifier.weight(1f),
                 )
                 FinderOptionCard(
                     title = "灯光闪烁",
                     icon = Icons.Filled.FlashlightOn,
-                    onClick = onFlashlight,
+                    onClick = {
+                        if (isConnected) {
+                            onFlashlight()
+                        } else {
+                            showNotConnectedDialog = true
+                        }
+                    },
                     modifier = Modifier.weight(1f),
                 )
             }

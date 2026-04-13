@@ -17,13 +17,14 @@ import com.example.myapplication.ui.WarmYellowDark
 internal fun obstacleMetrics(
     connectionState: ConnectionState,
     fallAlertState: FallAlertState,
+    batteryPct: Int? = null,
 ): List<StatMetric> {
     val delayValue = if (connectionState == ConnectionState.CONNECTED) "12ms" else "--"
     val computeValue = if (connectionState == ConnectionState.CONNECTED) "8.5 TFLOPS" else "待机"
-    val batteryValue = if (
-        fallAlertState == FallAlertState.FALL_CONFIRMED ||
-        fallAlertState == FallAlertState.EMERGENCY_CALLING
-    ) "18%" else "76%"
+    val batteryValue = when {
+        connectionState == ConnectionState.CONNECTED && batteryPct != null -> "$batteryPct%"
+        else -> "--"
+    }
     return listOf(
         StatMetric("延迟", delayValue, "实时", Color(0xFF00A07E), Icons.Filled.Speed),
         StatMetric("算力", computeValue, "本地", WarmYellowDark, Icons.Filled.Memory),

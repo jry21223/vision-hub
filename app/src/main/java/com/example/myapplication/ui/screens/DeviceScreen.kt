@@ -75,6 +75,7 @@ internal fun DeviceScreen(
         item {
             FinderCard(
                 fallAlertState = fallAlertState,
+                connectionState = connectionState,
                 onBuzzer = onBuzzer,
                 onFlashlight = onFlashlight,
             )

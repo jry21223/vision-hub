@@ -15,7 +15,10 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.myapplication.VisionDataHub
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -51,8 +54,9 @@ internal fun ObstacleScreen(
     onSensitivityClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val metrics = remember(connectionState, fallAlertState) {
-        obstacleMetrics(connectionState, fallAlertState)
+    val batteryPct by VisionDataHub.deviceBattery.collectAsStateWithLifecycle()
+    val metrics = remember(connectionState, fallAlertState, batteryPct) {
+        obstacleMetrics(connectionState, fallAlertState, batteryPct)
     }
 
     LazyColumn(
