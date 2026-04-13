@@ -83,6 +83,7 @@ import android.util.Log
 
 import com.example.myapplication.util.ContactPreference
 import com.example.myapplication.util.UserPreference
+import com.example.myapplication.util.AiServicePreference
 import com.example.myapplication.api.RetrofitClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -165,6 +166,12 @@ internal fun VisionHubScreen(
             p
         }
         VisionDataHub.updateUserProfile(profile)
+
+        // 加载 AI 服务配置
+        val aiConfig = withContext(Dispatchers.IO) {
+            AiServicePreference.load(context)
+        }
+        VisionDataHub.updateAiServiceConfig(aiConfig)
 
         // 尝试从后端同步用户档案（仅在需要时）
         coroutineScope.launch {
@@ -468,9 +475,7 @@ internal fun VisionHubScreen(
                     historyQuery = ""
                     currentDestination = VisionHubDestination.HISTORY
                 },
-                onVoiceSettings = { /* future: voice engine settings screen */ },
                 onObstacleSensitivity = { showSensitivitySheet = true },
-                onModelConfig = { /* future: model configuration screen */ },
                 onLogout = { /* future: user session management */ },
                 modifier = Modifier.padding(innerPadding),
             )

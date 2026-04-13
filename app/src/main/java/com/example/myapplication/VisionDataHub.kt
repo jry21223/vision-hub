@@ -30,6 +30,7 @@ object VisionDataHub {
     private val mutableFallConfig = MutableStateFlow(FallDetectionConfig.DEFAULT)
     private val mutableEmergencyContact = MutableStateFlow(EmergencyContactConfig.DEFAULT)
     private val mutableUserProfile = MutableStateFlow(UserProfile())
+    private val mutableAiServiceConfig = MutableStateFlow(AiServiceConfig.DEFAULT)
 
     val sensorPackets: SharedFlow<SensorPacket> = mutableSensorPackets.asSharedFlow()
     val imageFrames: SharedFlow<ByteArray> = mutableImageFrames.asSharedFlow()
@@ -41,6 +42,7 @@ object VisionDataHub {
     val fallConfig: StateFlow<FallDetectionConfig> = mutableFallConfig.asStateFlow()
     val emergencyContact: StateFlow<EmergencyContactConfig> = mutableEmergencyContact.asStateFlow()
     val userProfile: StateFlow<UserProfile> = mutableUserProfile.asStateFlow()
+    val aiServiceConfig: StateFlow<AiServiceConfig> = mutableAiServiceConfig.asStateFlow()
 
     fun publishSensorPacket(packet: SensorPacket) {
         mutableSensorPackets.tryEmit(packet)
@@ -90,6 +92,10 @@ object VisionDataHub {
 
     fun updateUserProfile(profile: UserProfile) {
         mutableUserProfile.value = profile
+    }
+
+    fun updateAiServiceConfig(config: AiServiceConfig) {
+        mutableAiServiceConfig.value = config
     }
 }
 

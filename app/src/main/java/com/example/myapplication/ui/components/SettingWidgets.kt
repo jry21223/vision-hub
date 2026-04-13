@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.SettingsVoice
 import androidx.compose.material.icons.filled.Visibility
@@ -78,9 +79,9 @@ internal fun SettingPill(
 
 @Composable
 internal fun SettingsGroupCard(
-    onVoiceSettings: () -> Unit = {},
+    aiServiceStatus: String = "未配置",
+    onAiSettings: () -> Unit = {},
     onObstacleSensitivity: () -> Unit = {},
-    onModelConfig: () -> Unit = {},
 ) {
     Card(
         shape = RoundedCornerShape(28.dp),
@@ -88,19 +89,15 @@ internal fun SettingsGroupCard(
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             SettingsRow(
-                icon = Icons.Filled.SettingsVoice,
-                title = "语音引擎设置",
-                onClick = onVoiceSettings,
+                icon = Icons.Filled.Psychology,
+                title = "AI 服务配置",
+                value = aiServiceStatus,
+                onClick = onAiSettings,
             )
             SettingsRow(
                 icon = Icons.Filled.Visibility,
                 title = "避障灵敏度",
                 onClick = onObstacleSensitivity,
-            )
-            SettingsRow(
-                icon = Icons.Filled.Memory,
-                title = "大模型配置",
-                onClick = onModelConfig,
             )
             SettingsRow(
                 icon = Icons.Filled.RecordVoiceOver,

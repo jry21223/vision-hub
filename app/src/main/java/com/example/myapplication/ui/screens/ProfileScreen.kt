@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -45,7 +46,9 @@ import com.example.myapplication.ui.components.PrimaryListAction
 import com.example.myapplication.ui.components.ProfileHeroCard
 import com.example.myapplication.ui.components.SettingsGroupCard
 import com.example.myapplication.util.ContactPreference
+import com.example.myapplication.util.AiServicePreference
 import com.example.myapplication.util.UserPreference
+import com.example.myapplication.AiServiceConfig
 import com.example.myapplication.api.RetrofitClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -54,9 +57,7 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun ProfileScreen(
     onOpenHistory: () -> Unit = {},
-    onVoiceSettings: () -> Unit = {},
     onObstacleSensitivity: () -> Unit = {},
-    onModelConfig: () -> Unit = {},
     onLogout: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -65,9 +66,11 @@ internal fun ProfileScreen(
 
     val emergencyContact by VisionDataHub.emergencyContact.collectAsStateWithLifecycle()
     val userProfile by VisionDataHub.userProfile.collectAsStateWithLifecycle()
+    val aiServiceConfig by VisionDataHub.aiServiceConfig.collectAsStateWithLifecycle()
 
     var showEditContactDialog by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showAiConfigDialog by remember { mutableStateOf(false) }
 
     // 紧急联系人编辑对话框
     if (showEditContactDialog) {
@@ -196,6 +199,23 @@ internal fun ProfileScreen(
         )
     }
 
+    // AI 服务配置对话框
+    if (showAiConfigDialog) {
+        AiConfigDialog(
+            initialConfig = aiServiceConfig,
+            onDismiss = { showAiConfigDialog = false },
+            onSave = { config ->
+                VisionDataHub.updateAiServiceConfig(config)
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        AiServicePreference.save(context, config)
+                    }
+                }
+                showAiConfigDialog = false
+            }
+        )
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -241,9 +261,9 @@ internal fun ProfileScreen(
         }
         item {
             SettingsGroupCard(
-                onVoiceSettings = onVoiceSettings,
+                aiServiceStatus = aiServiceConfig.getDisplayStatus(),
+                onAiSettings = { showAiConfigDialog = true },
                 onObstacleSensitivity = onObstacleSensitivity,
-                onModelConfig = onModelConfig,
             )
         }
         item {
@@ -259,4 +279,155 @@ internal fun ProfileScreen(
             )
         }
     }
+}
+
+@Composable
+private fun AiConfigDialog(
+    initialConfig: AiServiceConfig,
+    onDismiss: () -> Unit,
+    onSave: (AiServiceConfig) -> Unit,
+) {
+    var selectedPreset by remember { mutableStateOf("custom") }
+    var baseUrl by rememberSaveable { mutableStateOf(initialConfig.baseUrl) }
+    var apiKey by rememberSaveable { mutableStateOf(initialConfig.apiKey) }
+    var chatModel by rememberSaveable { mutableStateOf(initialConfig.chatModel) }
+    var ttsModel by rememberSaveable { mutableStateOf(initialConfig.ttsModel) }
+    var ttsVoice by rememberSaveable { mutableStateOf(initialConfig.ttsVoice) }
+    var sttModel by rememberSaveable { mutableStateOf(initialConfig.sttModel) }
+    var showAdvanced by remember { mutableStateOf(false) }
+
+    // 当选择预设时更新配置
+    fun applyPreset(preset: String) {
+        selectedPreset = preset
+        val config = when (preset) {
+            "openai" -> AiServiceConfig.OPENAI
+            "azure" -> AiServiceConfig.AZURE
+            "dashscope" -> AiServiceConfig.DASHSCOPE
+            "deepseek" -> AiServiceConfig.DEEPSEEK
+            else -> return
+        }
+        baseUrl = config.baseUrl
+        chatModel = config.chatModel
+        ttsModel = config.ttsModel
+        ttsVoice = config.ttsVoice
+        sttModel = config.sttModel
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("AI 服务配置") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // 预设选择（简化下拉菜单，使用文本按钮）
+                Text(
+                    text = "选择服务商预设",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = androidx.compose.material3.contentColorFor(MaterialTheme.colorScheme.surface)
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    listOf("openai" to "OpenAI", "azure" to "Azure", "dashscope" to "阿里云", "deepseek" to "DeepSeek", "custom" to "自定义")
+                        .forEach { (key, label) ->
+                            TextButton(
+                                onClick = { applyPreset(key) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (selectedPreset == key) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    }
+                                )
+                            }
+                        }
+                }
+
+                // Base URL
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text("API Base URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                // API Key
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text("API Key") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                // 高级配置展开/收起
+                TextButton(
+                    onClick = { showAdvanced = !showAdvanced },
+                    modifier = Modifier.align(androidx.compose.ui.Alignment.End)
+                ) {
+                    Text(if (showAdvanced) "收起高级配置" else "展开高级配置")
+                }
+
+                // 高级配置
+                if (showAdvanced) {
+                    OutlinedTextField(
+                        value = chatModel,
+                        onValueChange = { chatModel = it },
+                        label = { Text("对话模型") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = ttsModel,
+                        onValueChange = { ttsModel = it },
+                        label = { Text("语音合成模型") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = ttsVoice,
+                        onValueChange = { ttsVoice = it },
+                        label = { Text("语音音色") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = sttModel,
+                        onValueChange = { sttModel = it },
+                        label = { Text("语音识别模型") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onSave(
+                        AiServiceConfig(
+                            baseUrl = baseUrl.trim(),
+                            apiKey = apiKey.trim(),
+                            chatModel = chatModel.trim(),
+                            ttsModel = ttsModel.trim(),
+                            ttsVoice = ttsVoice.trim(),
+                            sttModel = sttModel.trim(),
+                        )
+                    )
+                },
+                enabled = baseUrl.isNotBlank() && apiKey.isNotBlank()
+            ) { Text("保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }

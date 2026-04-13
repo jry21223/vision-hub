@@ -43,6 +43,18 @@ object RetrofitClient {
     val userProfileApi: UserProfileApi by lazy {
         retrofit.create(UserProfileApi::class.java)
     }
+
+    /**
+     * 创建 AI 服务 API 实例（支持动态 baseUrl）
+     */
+    fun createAiServiceApi(baseUrl: String): AiServiceApi {
+        val retrofit = Retrofit.Builder()
+            .baseUrl(baseUrl)
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+        return retrofit.create(AiServiceApi::class.java)
+    }
 }
 
 /**
