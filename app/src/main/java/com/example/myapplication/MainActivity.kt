@@ -487,10 +487,10 @@ internal fun VisionHubScreen(
                 connectionState = connectionState,
                 fallAlertState = fallAlertState,
                 onBuzzer = {
-                    ttsEngine?.speak("正在发出蜂鸣提示", TextToSpeech.QUEUE_FLUSH, null, null)
+                    ttsEngine?.speak("正在为您执行寻物提示音", TextToSpeech.QUEUE_FLUSH, null, "device_buzzer")
                 },
                 onFlashlight = {
-                    ttsEngine?.speak("手电筒已开启", TextToSpeech.QUEUE_FLUSH, null, null)
+                    ttsEngine?.speak("已为您开启手机照明提醒", TextToSpeech.QUEUE_FLUSH, null, "device_flashlight")
                 },
                 modifier = Modifier.padding(innerPadding),
             )
