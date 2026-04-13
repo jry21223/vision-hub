@@ -18,6 +18,7 @@ import com.example.myapplication.ui.ScreenBackground
 import com.example.myapplication.ui.SuccessGreen
 import com.example.myapplication.ui.SuccessText
 import com.example.myapplication.ui.components.AppWordmark
+import com.example.myapplication.ui.components.ConnectionConfigCard
 import com.example.myapplication.ui.components.DeviceCoreCard
 import com.example.myapplication.ui.components.FinderCard
 import com.example.myapplication.ui.components.GuardianLocationCard
@@ -57,6 +58,9 @@ internal fun DeviceScreen(
                 background = SuccessGreen,
                 foreground = SuccessText,
             )
+        }
+        item {
+            ConnectionConfigCard(port = 8080)
         }
         item {
             DeviceCoreCard(connectionState = connectionState, metrics = metrics)

@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +48,8 @@ import com.example.myapplication.ui.WarmYellowDark
 import com.example.myapplication.util.finderSupportingText
 import com.example.myapplication.util.guardianLocationText
 import com.example.myapplication.util.guardianLocationUpdateText
+import java.net.Inet4Address
+import java.net.NetworkInterface
 
 @Composable
 internal fun DeviceCoreCard(
@@ -268,5 +271,103 @@ private fun FinderOptionCard(
                 color = PrimaryText,
             )
         }
+    }
+}
+
+@Composable
+internal fun ConnectionConfigCard(
+    port: Int = 8080,
+) {
+    val localIp = remember { getLocalIpAddress() ?: "未知" }
+
+    Card(
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = CardBackground),
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "连接配置",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Black,
+                        color = WarmYellowDark,
+                    )
+                    Text(
+                        text = "ESP32 设备连接信息",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Black,
+                        color = PrimaryText,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // IP 地址显示
+            ConfigItem(
+                label = "手机 IP 地址",
+                value = localIp,
+                hint = "请在 ESP32 上配置此地址",
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            ConfigItem(
+                label = "TCP 端口",
+                value = port.toString(),
+                hint = "默认端口 8080",
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            ConfigItem(
+                label = "连接协议",
+                value = "TCP Socket",
+                hint = "JSON + JPEG 混合流",
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConfigItem(
+    label: String,
+    value: String,
+    hint: String,
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceSoft),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = SecondaryText,
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                color = PrimaryText,
+            )
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = SecondaryText.copy(alpha = 0.7f),
+            )
+        }
+    }
+}
+
+private fun getLocalIpAddress(): String? {
+    return try {
+        NetworkInterface.getNetworkInterfaces()?.toList()
+            ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
+            ?.filterIsInstance<Inet4Address>()
+            ?.firstOrNull { !it.isLoopbackAddress && it.hostAddress?.startsWith("192.168.") == true }
+            ?.hostAddress
+    } catch (e: Exception) {
+        null
     }
 }

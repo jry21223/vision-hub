@@ -89,7 +89,8 @@ internal fun recognitionActionSubtitle(state: LocalVisionState): String =
 
 internal fun homeConnectionBannerTitle(connectionState: ConnectionState): String =
     when (connectionState) {
-        ConnectionState.CONNECTED, ConnectionState.LISTENING -> "设备已连接"
+        ConnectionState.CONNECTED -> "设备已连接"
+        ConnectionState.LISTENING -> "等待设备接入"
         ConnectionState.STOPPED -> "未连接"
         ConnectionState.STARTING -> "启动中"
         ConnectionState.ERROR -> "连接异常"
@@ -97,7 +98,8 @@ internal fun homeConnectionBannerTitle(connectionState: ConnectionState): String
 
 internal fun homeConnectionBannerSubtitle(connectionState: ConnectionState): String =
     when (connectionState) {
-        ConnectionState.CONNECTED, ConnectionState.LISTENING -> "视觉引导系统运行中"
+        ConnectionState.CONNECTED -> "视觉引导系统运行中"
+        ConnectionState.LISTENING -> "请在 ESP32 设备上配置连接"
         ConnectionState.STOPPED -> "点击连接设备以开始使用"
         ConnectionState.STARTING -> "正在初始化服务..."
         ConnectionState.ERROR -> "连接遇到问题，请检查网络"

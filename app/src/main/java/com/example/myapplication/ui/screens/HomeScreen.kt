@@ -82,13 +82,19 @@ internal fun HomeScreen(
             )
         }
         item {
-            val isConnected = connectionState == ConnectionState.CONNECTED || connectionState == ConnectionState.LISTENING
+            val isConnected = connectionState == ConnectionState.CONNECTED
+            val isListening = connectionState == ConnectionState.LISTENING
+            val (bgColor, fgColor, icon) = when {
+                isConnected -> Triple(SuccessGreen, SuccessText, Icons.Filled.CheckCircle)
+                isListening -> Triple(SurfaceSoft, SecondaryText, Icons.Filled.Search)
+                else -> Triple(SurfaceSoft, SecondaryText, Icons.Filled.Search)
+            }
             StatusBanner(
                 title = homeConnectionBannerTitle(connectionState),
                 subtitle = homeConnectionBannerSubtitle(connectionState),
-                icon = if (isConnected) Icons.Filled.CheckCircle else Icons.Filled.Search,
-                background = if (isConnected) SuccessGreen else SurfaceSoft,
-                foreground = if (isConnected) SuccessText else SecondaryText,
+                icon = icon,
+                background = bgColor,
+                foreground = fgColor,
             )
         }
     }
