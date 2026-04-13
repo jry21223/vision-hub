@@ -11,4 +11,5 @@ data class SensorPacket(
     val imu: ImuReading,
     val btnA: Int,
     val btnB: Int,
+    val batteryPct: Int? = null,
 )

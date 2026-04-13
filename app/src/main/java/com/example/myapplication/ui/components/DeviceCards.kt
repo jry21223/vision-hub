@@ -16,17 +16,26 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +59,8 @@ import com.example.myapplication.util.guardianLocationText
 import com.example.myapplication.util.guardianLocationUpdateText
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun DeviceCoreCard(
@@ -278,40 +289,74 @@ private fun FinderOptionCard(
 internal fun ConnectionConfigCard(
     port: Int = 8080,
 ) {
-    val localIp = remember { getLocalIpAddress() ?: "未知" }
+    var localIp by remember { mutableStateOf("获取中…") }
+    LaunchedEffect(Unit) {
+        localIp = withContext(Dispatchers.IO) { getLocalIpAddress() ?: "未知" }
+    }
+    var ipOverride by remember { mutableStateOf("") }
+    var showEditDialog by remember { mutableStateOf(false) }
+    val displayIp = ipOverride.ifBlank { localIp }
+
+    if (showEditDialog) {
+        var dialogText by remember(showEditDialog) { mutableStateOf(displayIp) }
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text("修改 IP 地址") },
+            text = {
+                OutlinedTextField(
+                    value = dialogText,
+                    onValueChange = { dialogText = it },
+                    label = { Text("IP 地址") },
+                    placeholder = { Text(localIp) },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    ipOverride = dialogText.trim()
+                    showEditDialog = false
+                }) { Text("确认") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDialog = false }) { Text("取消") }
+            },
+        )
+    }
 
     Card(
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = CardBackground),
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top,
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "连接配置",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Black,
-                        color = WarmYellowDark,
-                    )
-                    Text(
-                        text = "ESP32 设备连接信息",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Black,
-                        color = PrimaryText,
-                    )
-                }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "连接配置",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                    color = WarmYellowDark,
+                )
+                Text(
+                    text = "ESP32 设备连接信息",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Black,
+                    color = PrimaryText,
+                )
             }
             Spacer(modifier = Modifier.height(16.dp))
 
-            // IP 地址显示
             ConfigItem(
                 label = "手机 IP 地址",
-                value = localIp,
+                value = displayIp,
                 hint = "请在 ESP32 上配置此地址",
+                trailingContent = {
+                    IconButton(onClick = { showEditDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.Edit,
+                            contentDescription = "修改 IP",
+                            tint = SecondaryText,
+                        )
+                    }
+                },
             )
             Spacer(modifier = Modifier.height(12.dp))
             ConfigItem(
@@ -334,28 +379,37 @@ private fun ConfigItem(
     label: String,
     value: String,
     hint: String,
+    trailingContent: @Composable (() -> Unit)? = null,
 ) {
     Card(
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceSoft),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = SecondaryText,
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Black,
-                color = PrimaryText,
-            )
-            Text(
-                text = hint,
-                style = MaterialTheme.typography.bodySmall,
-                color = SecondaryText.copy(alpha = 0.7f),
-            )
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = SecondaryText,
+                )
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    color = PrimaryText,
+                )
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = SecondaryText.copy(alpha = 0.7f),
+                )
+            }
+            trailingContent?.invoke()
         }
     }
 }
@@ -365,7 +419,7 @@ private fun getLocalIpAddress(): String? {
         NetworkInterface.getNetworkInterfaces()?.toList()
             ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
             ?.filterIsInstance<Inet4Address>()
-            ?.firstOrNull { !it.isLoopbackAddress && it.hostAddress?.startsWith("192.168.") == true }
+            ?.firstOrNull { !it.isLoopbackAddress && it.isSiteLocalAddress }
             ?.hostAddress
     } catch (e: Exception) {
         null

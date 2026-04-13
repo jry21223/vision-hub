@@ -56,6 +56,7 @@ class VisionStreamDecoder {
             ),
             btnA = extractInt(frame, "btn_a"),
             btnB = extractInt(frame, "btn_b"),
+            batteryPct = extractIntOrNull(frame, "battery_pct"),
         )
     }
 
@@ -65,6 +66,10 @@ class VisionStreamDecoder {
 
     private fun extractDouble(frame: String, key: String): Double {
         return extractValue(frame, key).toDouble()
+    }
+
+    private fun extractIntOrNull(frame: String, key: String): Int? {
+        return Regex("\"$key\"\\s*:\\s*(-?\\d+)").find(frame)?.groupValues?.get(1)?.toIntOrNull()
     }
 
     private fun extractValue(frame: String, key: String): String {

@@ -31,7 +31,11 @@ internal fun obstacleMetrics(
     )
 }
 
-internal fun deviceMetrics(connectionState: ConnectionState): List<StatMetric> {
+internal fun deviceMetrics(connectionState: ConnectionState, batteryPct: Int? = null): List<StatMetric> {
+    val batteryValue = when {
+        connectionState == ConnectionState.CONNECTED && batteryPct != null -> "$batteryPct%"
+        else -> "--"
+    }
     return listOf(
         StatMetric(
             label = "响应延迟",
@@ -42,7 +46,7 @@ internal fun deviceMetrics(connectionState: ConnectionState): List<StatMetric> {
         ),
         StatMetric(
             label = "剩余电量",
-            value = if (connectionState == ConnectionState.CONNECTED) "92%" else "--",
+            value = batteryValue,
             supporting = "设备",
             accent = Color(0xFF3C8B41),
             icon = Icons.Filled.Battery6Bar,

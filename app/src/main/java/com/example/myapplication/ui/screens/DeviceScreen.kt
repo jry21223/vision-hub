@@ -9,7 +9,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.myapplication.VisionDataHub
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.myapplication.ConnectionState
@@ -34,7 +37,8 @@ internal fun DeviceScreen(
     onFlashlight: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val metrics = remember(connectionState) { deviceMetrics(connectionState) }
+    val batteryPct by VisionDataHub.deviceBattery.collectAsStateWithLifecycle()
+    val metrics = remember(connectionState, batteryPct) { deviceMetrics(connectionState, batteryPct) }
 
     LazyColumn(
         modifier = modifier
