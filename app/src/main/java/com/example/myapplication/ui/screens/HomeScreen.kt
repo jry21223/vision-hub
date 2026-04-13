@@ -21,8 +21,10 @@ import com.example.myapplication.FallAlertState
 import com.example.myapplication.LocalVisionState
 import com.example.myapplication.ui.PrimaryText
 import com.example.myapplication.ui.ScreenBackground
+import com.example.myapplication.ui.SecondaryText
 import com.example.myapplication.ui.SuccessGreen
 import com.example.myapplication.ui.SuccessText
+import com.example.myapplication.ui.SurfaceSoft
 import com.example.myapplication.ui.components.AppWordmark
 import com.example.myapplication.ui.components.GiantActionCard
 import com.example.myapplication.ui.components.StatusBanner
@@ -80,12 +82,13 @@ internal fun HomeScreen(
             )
         }
         item {
+            val isConnected = connectionState == ConnectionState.CONNECTED || connectionState == ConnectionState.LISTENING
             StatusBanner(
                 title = homeConnectionBannerTitle(connectionState),
                 subtitle = homeConnectionBannerSubtitle(connectionState),
-                icon = Icons.Filled.CheckCircle,
-                background = SuccessGreen,
-                foreground = SuccessText,
+                icon = if (isConnected) Icons.Filled.CheckCircle else Icons.Filled.Search,
+                background = if (isConnected) SuccessGreen else SurfaceSoft,
+                foreground = if (isConnected) SuccessText else SecondaryText,
             )
         }
     }

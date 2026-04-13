@@ -88,17 +88,19 @@ internal fun recognitionActionSubtitle(state: LocalVisionState): String =
     }
 
 internal fun homeConnectionBannerTitle(connectionState: ConnectionState): String =
-    if (connectionState == ConnectionState.CONNECTED || connectionState == ConnectionState.LISTENING) {
-        "设备已连接"
-    } else {
-        "设备准备中"
+    when (connectionState) {
+        ConnectionState.CONNECTED, ConnectionState.LISTENING -> "设备已连接"
+        ConnectionState.STOPPED -> "未连接"
+        ConnectionState.STARTING -> "启动中"
+        ConnectionState.ERROR -> "连接异常"
     }
 
 internal fun homeConnectionBannerSubtitle(connectionState: ConnectionState): String =
-    if (connectionState == ConnectionState.CONNECTED || connectionState == ConnectionState.LISTENING) {
-        "视觉引导系统运行中"
-    } else {
-        "正在等待胸牌与眼镜端建立连接"
+    when (connectionState) {
+        ConnectionState.CONNECTED, ConnectionState.LISTENING -> "视觉引导系统运行中"
+        ConnectionState.STOPPED -> "点击连接设备以开始使用"
+        ConnectionState.STARTING -> "正在初始化服务..."
+        ConnectionState.ERROR -> "连接遇到问题，请检查网络"
     }
 
 internal fun recognitionBannerTitle(state: LocalVisionState): String =
