@@ -11,10 +11,10 @@ object NotificationHelper {
     const val CHANNEL_ID = "vision_hub_service_channel"
     const val NOTIFICATION_ID = 1001
 
-    private const val CHANNEL_NAME = "视觉中枢服务"
-    private const val CHANNEL_DESCRIPTION = "用于保持视觉中枢前台运行"
-    private const val NOTIFICATION_TITLE = "视觉中枢运行中"
-    private const val NOTIFICATION_CONTENT = "正在守护您的安全"
+    private const val CHANNEL_NAME = "智能胸牌服务"
+    private const val CHANNEL_DESCRIPTION = "保持智能胸牌实时连接，确保紧急情况下能快速响应"
+    private const val NOTIFICATION_TITLE = "智能胸牌已连接"
+    private const val NOTIFICATION_CONTENT = "您的智能守护已启动，点击可返回应用"
 
     fun createChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
