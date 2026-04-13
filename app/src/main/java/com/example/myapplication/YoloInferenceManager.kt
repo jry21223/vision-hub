@@ -12,6 +12,8 @@ import kotlin.math.floor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 
 internal const val MEDICINE_BOX_LABEL = "Medicine_Box"
@@ -58,37 +60,81 @@ internal object YoloInferenceManager {
                     ?: return@withContext LocalVisionState(
                         status = LocalVisionStatus.ERROR,
                         summary = "图像帧解码失败",
+                        result = null,
                     )
+
                 val holder = session(context.applicationContext)
                 if (!supportsRequiredClassLabels(holder.classLabels)) {
                     return@withContext LocalVisionState(
                         status = LocalVisionStatus.ERROR,
                         summary = "模型标签不包含药盒或文本区域类别",
+                        result = null,
                     )
                 }
-                val preparedFrame = prepareInput(sourceBitmap)
-                val detections = runInference(holder, preparedFrame.tensorData)
-                val medicineBox = selectHighestConfidenceDetection(detections, MEDICINE_BOX_LABEL)
-                val textRegion = selectHighestConfidenceDetection(detections, TEXT_REGION_LABEL)
-                val croppedTextRegion = textRegion?.let { cropTextRegion(sourceBitmap, it) }
+
+                // 并行执行 YOLO 检测和全图 OCR
+                val yoloDeferred = async {
+                    runYoloDetection(holder, sourceBitmap)
+                }
+                val ocrDeferred = async {
+                    OcrEngine.recognize(sourceBitmap)
+                }
+
+                val yoloResult = yoloDeferred.await()
+                val ocrResult = ocrDeferred.await()
+
+                val result = VisionAnalysisResult(
+                    hasMedicineBox = yoloResult.medicineBox != null,
+                    medicineBoxLocation = yoloResult.medicineBox?.let {
+                        describeRelativeLocation(it, sourceBitmap.width, sourceBitmap.height)
+                    },
+                    medicineBoxAreaRatio = yoloResult.medicineBox?.let {
+                        calculateAreaRatio(it, sourceBitmap.width, sourceBitmap.height)
+                    },
+                    ocrText = ocrResult?.text,
+                    hasOcrContent = ocrResult?.text?.isNotBlank() == true,
+                )
 
                 LocalVisionState(
                     status = LocalVisionStatus.FRAME_ANALYZED,
-                    summary = buildLocalVisionSummary(
-                        medicineBox = medicineBox,
-                        frameWidth = sourceBitmap.width,
-                        frameHeight = sourceBitmap.height,
-                        hasTextRegion = textRegion != null,
-                        textRegionCropSucceeded = croppedTextRegion != null,
-                    ),
+                    summary = buildVisionSummary(result),
+                    result = result,
                 )
             }.getOrElse { error ->
                 LocalVisionState(
                     status = LocalVisionStatus.ERROR,
                     summary = error.message ?: "本地视觉推理失败",
+                    result = null,
                 )
             }
         }
+    }
+
+    private data class YoloResult(
+        val medicineBox: YoloDetection?,
+        val textRegion: YoloDetection?,
+    )
+
+    private suspend fun runYoloDetection(
+        holder: SessionHolder,
+        sourceBitmap: Bitmap,
+    ): YoloResult {
+        val preparedFrame = prepareInput(sourceBitmap)
+        val detections = runInference(holder, preparedFrame.tensorData)
+        val medicineBox = selectHighestConfidenceDetection(detections, MEDICINE_BOX_LABEL)
+        val textRegion = selectHighestConfidenceDetection(detections, TEXT_REGION_LABEL)
+        return YoloResult(medicineBox = medicineBox, textRegion = textRegion)
+    }
+
+    private fun calculateAreaRatio(
+        detection: YoloDetection,
+        frameWidth: Int,
+        frameHeight: Int,
+    ): Float {
+        if (frameWidth <= 0 || frameHeight <= 0) return 0f
+        val boxArea = (detection.right - detection.left) * (detection.bottom - detection.top)
+        val frameArea = frameWidth.toFloat() * frameHeight.toFloat()
+        return boxArea / frameArea
     }
 
     private suspend fun session(context: Context): SessionHolder {
@@ -408,22 +454,22 @@ internal fun cropTextRegion(
     }.getOrNull()
 }
 
-internal fun buildLocalVisionSummary(
-    medicineBox: YoloDetection?,
-    frameWidth: Int,
-    frameHeight: Int,
-    hasTextRegion: Boolean,
-    textRegionCropSucceeded: Boolean,
-): String {
-    val medicineSummary = if (medicineBox == null) {
-        "未检测到药盒"
+internal fun buildVisionSummary(result: VisionAnalysisResult): String {
+    val yoloSummary = if (result.hasMedicineBox) {
+        "药盒位于${result.medicineBoxLocation}"
     } else {
-        "药盒位于${describeRelativeLocation(medicineBox, frameWidth, frameHeight)}"
+        "未检测到药盒"
     }
-    val textSummary = when {
-        !hasTextRegion -> "未检测到文本区域"
-        textRegionCropSucceeded -> "已截取文本区域"
-        else -> "文本区域截取失败"
+
+    val ocrSummary = when {
+        !result.hasOcrContent -> null // 静默模式：无文字时不播报
+        result.ocrText!!.length > 50 -> "文字内容：${result.ocrText.take(50)}..."
+        else -> "文字内容：${result.ocrText}"
     }
-    return "$medicineSummary，$textSummary"
+
+    return if (ocrSummary != null) {
+        "$yoloSummary，$ocrSummary"
+    } else {
+        yoloSummary
+    }
 }

@@ -335,7 +335,27 @@ internal fun VisionHubScreen(
     }
 
     val onSpeakResult: () -> Unit = {
-        ttsEngine?.speak(localVisionState.summary, TextToSpeech.QUEUE_FLUSH, null, null)
+        val result = localVisionState.result
+        if (result != null && result.hasMedicineBox) {
+            // 判断远近模式：面积比例 > 10% 认为是近景（细看模式）
+            val isCloseUp = (result.medicineBoxAreaRatio ?: 0f) > 0.10f
+
+            val ttsText = if (isCloseUp) {
+                // 细看模式：播报药盒位置 + OCR 文字
+                if (result.hasOcrContent) {
+                    "药盒位于${result.medicineBoxLocation}，文字内容：${result.ocrText}"
+                } else {
+                    "药盒位于${result.medicineBoxLocation}，暂未识别到文字"
+                }
+            } else {
+                // 找寻模式：只播报药盒位置
+                "药盒位于${result.medicineBoxLocation}"
+            }
+            ttsEngine?.speak(ttsText, TextToSpeech.QUEUE_FLUSH, null, null)
+        } else {
+            // 没有检测到药盒，播报默认摘要
+            ttsEngine?.speak(localVisionState.summary, TextToSpeech.QUEUE_FLUSH, null, null)
+        }
     }
 
     val onVoiceInput: () -> Unit = {
