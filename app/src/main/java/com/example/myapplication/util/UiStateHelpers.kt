@@ -18,8 +18,9 @@ internal fun obstacleMetrics(
     connectionState: ConnectionState,
     fallAlertState: FallAlertState,
     batteryPct: Int? = null,
+    latencyMs: Int? = null,
 ): List<StatMetric> {
-    val delayValue = if (connectionState == ConnectionState.CONNECTED) "12ms" else "--"
+    val delayValue = if (connectionState == ConnectionState.CONNECTED) formatLatency(latencyMs) else "--"
     val computeValue = if (connectionState == ConnectionState.CONNECTED) "8.5 TFLOPS" else "待机"
     val batteryValue = when {
         connectionState == ConnectionState.CONNECTED && batteryPct != null -> "$batteryPct%"
@@ -32,7 +33,11 @@ internal fun obstacleMetrics(
     )
 }
 
-internal fun deviceMetrics(connectionState: ConnectionState, batteryPct: Int? = null): List<StatMetric> {
+internal fun deviceMetrics(
+    connectionState: ConnectionState,
+    batteryPct: Int? = null,
+    latencyMs: Int? = null,
+): List<StatMetric> {
     val batteryValue = when {
         connectionState == ConnectionState.CONNECTED && batteryPct != null -> "$batteryPct%"
         else -> "--"
@@ -40,8 +45,8 @@ internal fun deviceMetrics(connectionState: ConnectionState, batteryPct: Int? = 
     return listOf(
         StatMetric(
             label = "响应延迟",
-            value = if (connectionState == ConnectionState.CONNECTED) "24ms" else "--",
-            supporting = "局域网",
+            value = if (connectionState == ConnectionState.CONNECTED) formatLatency(latencyMs) else "--",
+            supporting = "链路",
             accent = WarmYellowDark,
             icon = Icons.Filled.Speed,
         ),
@@ -58,12 +63,27 @@ internal fun deviceMetrics(connectionState: ConnectionState, batteryPct: Int? = 
 internal fun obstacleDangerHeadline(
     connectionState: ConnectionState,
     fallAlertState: FallAlertState,
+    radarDistance: Int? = null,
 ): String = when {
     fallAlertState == FallAlertState.FALL_CONFIRMED ||
         fallAlertState == FallAlertState.EMERGENCY_CALLING -> "检测到跌倒风险"
-    connectionState == ConnectionState.CONNECTED -> "前方 0.8 米 危险"
+    connectionState == ConnectionState.CONNECTED && radarDistance != null ->
+        "前方 ${formatRadarDistance(radarDistance)} 危险"
+    connectionState == ConnectionState.CONNECTED -> "前方障碍预警"
     else -> "环境数据同步中"
 }
+
+private fun formatRadarDistance(radarDistance: Int): String {
+    val meters = radarDistance / 100.0
+    val formatted = if (radarDistance % 100 == 0) {
+        meters.toInt().toString()
+    } else {
+        meters.toString().trimEnd('0').trimEnd('.')
+    }
+    return "$formatted 米"
+}
+
+private fun formatLatency(latencyMs: Int?): String = latencyMs?.let { "${it}ms" } ?: "--"
 
 internal fun obstacleSensitivityLabel(
     connectionState: ConnectionState,

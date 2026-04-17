@@ -55,8 +55,10 @@ internal fun ObstacleScreen(
     modifier: Modifier = Modifier,
 ) {
     val batteryPct by VisionDataHub.deviceBattery.collectAsStateWithLifecycle()
-    val metrics = remember(connectionState, fallAlertState, batteryPct) {
-        obstacleMetrics(connectionState, fallAlertState, batteryPct)
+    val radarDistance by VisionDataHub.radarDistance.collectAsStateWithLifecycle()
+    val latencyMs by VisionDataHub.networkLatencyMs.collectAsStateWithLifecycle()
+    val metrics = remember(connectionState, fallAlertState, batteryPct, latencyMs) {
+        obstacleMetrics(connectionState, fallAlertState, batteryPct, latencyMs)
     }
 
     LazyColumn(
@@ -75,7 +77,7 @@ internal fun ObstacleScreen(
         }
         item {
             StatusBanner(
-                title = obstacleDangerHeadline(connectionState, fallAlertState),
+                title = obstacleDangerHeadline(connectionState, fallAlertState, radarDistance),
                 subtitle = obstacleGuidance(connectionState, fallAlertState),
                 icon = Icons.Filled.Warning,
                 background = DangerRed,

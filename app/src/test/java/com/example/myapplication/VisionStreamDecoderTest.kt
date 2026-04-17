@@ -28,6 +28,34 @@ class VisionStreamDecoderTest {
     }
 
     @Test
+    fun `decode emits battery percentage when provided`() {
+        val sensorPackets = mutableListOf<SensorPacket>()
+
+        decoder.decode(
+            input = sensorJson(batteryPct = 76).byteInputStream(),
+            onSensorPacket = { packet -> sensorPackets.add(packet) },
+            onImageFrame = { error("Did not expect image frame") },
+        )
+
+        assertEquals(1, sensorPackets.size)
+        assertEquals(76, sensorPackets.single().batteryPct)
+    }
+
+    @Test
+    fun `decode emits null battery percentage when omitted`() {
+        val sensorPackets = mutableListOf<SensorPacket>()
+
+        decoder.decode(
+            input = sensorJson().byteInputStream(),
+            onSensorPacket = { packet -> sensorPackets.add(packet) },
+            onImageFrame = { error("Did not expect image frame") },
+        )
+
+        assertEquals(1, sensorPackets.size)
+        assertEquals(null, sensorPackets.single().batteryPct)
+    }
+
+    @Test
     fun `decode emits jpeg bytes from jpeg frame`() {
         val imageFrames = mutableListOf<ByteArray>()
         val expectedImage = jpegFrame()
@@ -73,8 +101,14 @@ class VisionStreamDecoderTest {
         assertArrayEquals(expectedImage, imageFrames.single())
     }
 
-    private fun sensorJson(radarDist: Int = 120, btnA: Int = 0, btnB: Int = 1): String {
-        return """{"radar_dist":$radarDist,"imu":{"ax":0.1,"ay":0.5,"az":9.8},"btn_a":$btnA,"btn_b":$btnB}"""
+    private fun sensorJson(
+        radarDist: Int = 120,
+        btnA: Int = 0,
+        btnB: Int = 1,
+        batteryPct: Int? = null,
+    ): String {
+        val batteryField = batteryPct?.let { ",\"battery_pct\":$it" }.orEmpty()
+        return """{"radar_dist":$radarDist,"imu":{"ax":0.1,"ay":0.5,"az":9.8},"btn_a":$btnA,"btn_b":$btnB$batteryField}"""
     }
 
     private fun jpegFrame(): ByteArray {

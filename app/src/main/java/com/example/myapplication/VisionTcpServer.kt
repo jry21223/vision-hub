@@ -35,6 +35,7 @@ class VisionTcpServer(
                             soTimeout = CLIENT_SOCKET_TIMEOUT_MILLIS
                         }
                         clientSockets += client
+                        dataHub.updateRemoteDeviceIp(client.inetAddress?.hostAddress)
                         dataHub.updateConnectionState(ConnectionState.CONNECTED)
                         launch {
                             client.use { connectedClient ->
@@ -42,7 +43,14 @@ class VisionTcpServer(
                             }
                             clientSockets -= client
                             if (!socket.isClosed) {
-                                dataHub.updateConnectionState(ConnectionState.LISTENING)
+                                val remainingClient = clientSockets.firstOrNull()
+                                if (remainingClient == null) {
+                                    dataHub.clearConnectionRuntimeInfo()
+                                    dataHub.updateConnectionState(ConnectionState.LISTENING)
+                                } else {
+                                    dataHub.updateRemoteDeviceIp(remainingClient.inetAddress?.hostAddress)
+                                    dataHub.updateConnectionState(ConnectionState.CONNECTED)
+                                }
                             }
                         }
                     }
@@ -62,6 +70,7 @@ class VisionTcpServer(
         clientSockets.clear()
         serverSocket?.closeQuietly()
         serverSocket = null
+        dataHub.clearConnectionRuntimeInfo()
         dataHub.updateConnectionState(ConnectionState.STOPPED)
     }
 

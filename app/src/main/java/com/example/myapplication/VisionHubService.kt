@@ -20,6 +20,7 @@ class VisionHubService : Service() {
     @Volatile
     private var fallDetectionEngine = FallDetectionEngine()
     private val localVisionAnalyzer = LocalVisionAnalyzer()
+    private val latencyMonitor = DeviceLatencyMonitor(scope = serviceScope)
     private val tcpServer = VisionTcpServer(
         scope = serviceScope,
         decoder = VisionStreamDecoder(),
@@ -43,6 +44,7 @@ class VisionHubService : Service() {
         observeFallConfig()
         observeSensorPackets()
         observeImageFrames()
+        latencyMonitor.start()
         tcpServer.start()
     }
 
@@ -64,6 +66,7 @@ class VisionHubService : Service() {
 
     override fun onDestroy() {
         tcpServer.stop()
+        latencyMonitor.stop()
         serviceScope.cancel()
         wakeLock?.let { currentWakeLock ->
             if (currentWakeLock.isHeld) {

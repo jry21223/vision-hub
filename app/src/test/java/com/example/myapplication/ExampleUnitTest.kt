@@ -6,12 +6,64 @@ import com.example.myapplication.util.connectionStatusText
 import com.example.myapplication.util.fallAlertDescription
 import com.example.myapplication.util.fallAlertTitle
 import com.example.myapplication.util.filterHistoryRecords
+import com.example.myapplication.util.obstacleDangerHeadline
+import com.example.myapplication.util.obstacleMetrics
+import com.example.myapplication.util.deviceMetrics
 import com.example.myapplication.util.localVisionStatusText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExampleUnitTest {
+    @Test
+    fun `obstacleDangerHeadline uses radar distance when connected`() {
+        assertEquals(
+            "前方 0.8 米 危险",
+            obstacleDangerHeadline(
+                connectionState = ConnectionState.CONNECTED,
+                fallAlertState = FallAlertState.IDLE,
+                radarDistance = 80,
+            ),
+        )
+    }
+
+    @Test
+    fun `obstacleDangerHeadline keeps fall alert priority over radar distance`() {
+        assertEquals(
+            "检测到跌倒风险",
+            obstacleDangerHeadline(
+                connectionState = ConnectionState.CONNECTED,
+                fallAlertState = FallAlertState.FALL_CONFIRMED,
+                radarDistance = 80,
+            ),
+        )
+    }
+
+    @Test
+    fun `obstacleMetrics uses real latency value`() {
+        val metrics = obstacleMetrics(
+            connectionState = ConnectionState.CONNECTED,
+            fallAlertState = FallAlertState.IDLE,
+            batteryPct = 62,
+            latencyMs = 37,
+        )
+
+        assertEquals("37ms", metrics.first { it.label == "延迟" }.value)
+        assertEquals("62%", metrics.first { it.label == "电量" }.value)
+    }
+
+    @Test
+    fun `deviceMetrics uses placeholder when latency missing`() {
+        val metrics = deviceMetrics(
+            connectionState = ConnectionState.CONNECTED,
+            batteryPct = 51,
+            latencyMs = null,
+        )
+
+        assertEquals("--", metrics.first { it.label == "响应延迟" }.value)
+        assertEquals("51%", metrics.first { it.label == "剩余电量" }.value)
+    }
+
     @Test
     fun `connectionStatusText maps listening state`() {
         assertEquals("连接状态：监听中", connectionStatusText(ConnectionState.LISTENING))

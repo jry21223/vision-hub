@@ -473,3 +473,23 @@ internal fun buildVisionSummary(result: VisionAnalysisResult): String {
         yoloSummary
     }
 }
+
+internal fun buildLocalVisionSummary(
+    medicineBox: YoloDetection?,
+    frameWidth: Int,
+    frameHeight: Int,
+    hasTextRegion: Boolean,
+    textRegionCropSucceeded: Boolean,
+): String {
+    val medicineSummary = if (medicineBox == null) {
+        "未检测到药盒"
+    } else {
+        "药盒位于${describeRelativeLocation(medicineBox, frameWidth, frameHeight)}"
+    }
+    val textSummary = when {
+        !hasTextRegion -> "未检测到文本区域"
+        textRegionCropSucceeded -> "已截取文本区域"
+        else -> "文本区域截取失败"
+    }
+    return "$medicineSummary，$textSummary"
+}

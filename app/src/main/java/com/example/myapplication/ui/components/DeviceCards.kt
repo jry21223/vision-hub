@@ -318,6 +318,7 @@ private fun FinderOptionCard(
 @Composable
 internal fun ConnectionConfigCard(
     port: Int = 8080,
+    remoteDeviceIp: String? = null,
 ) {
     var localIp by remember { mutableStateOf("获取中…") }
     LaunchedEffect(Unit) {
@@ -396,9 +397,15 @@ internal fun ConnectionConfigCard(
             )
             Spacer(modifier = Modifier.height(12.dp))
             ConfigItem(
+                label = "设备 IP",
+                value = remoteDeviceIp ?: "未知",
+                hint = if (remoteDeviceIp == null) "等待设备连接" else "当前接入设备",
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            ConfigItem(
                 label = "连接协议",
                 value = "TCP Socket",
-                hint = "JSON + JPEG 混合流",
+                hint = "radar_dist / ax / ay / az / btn_a / btn_b / battery_pct",
             )
         }
     }

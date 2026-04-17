@@ -32,6 +32,9 @@ object VisionDataHub {
     private val mutableUserProfile = MutableStateFlow(UserProfile())
     private val mutableAiServiceConfig = MutableStateFlow(AiServiceConfig.DEFAULT)
     private val mutableDeviceBattery = MutableStateFlow<Int?>(null)
+    private val mutableRadarDistance = MutableStateFlow<Int?>(null)
+    private val mutableRemoteDeviceIp = MutableStateFlow<String?>(null)
+    private val mutableNetworkLatencyMs = MutableStateFlow<Int?>(null)
 
     val sensorPackets: SharedFlow<SensorPacket> = mutableSensorPackets.asSharedFlow()
     val imageFrames: SharedFlow<ByteArray> = mutableImageFrames.asSharedFlow()
@@ -45,10 +48,14 @@ object VisionDataHub {
     val userProfile: StateFlow<UserProfile> = mutableUserProfile.asStateFlow()
     val aiServiceConfig: StateFlow<AiServiceConfig> = mutableAiServiceConfig.asStateFlow()
     val deviceBattery: StateFlow<Int?> = mutableDeviceBattery.asStateFlow()
+    val radarDistance: StateFlow<Int?> = mutableRadarDistance.asStateFlow()
+    val remoteDeviceIp: StateFlow<String?> = mutableRemoteDeviceIp.asStateFlow()
+    val networkLatencyMs: StateFlow<Int?> = mutableNetworkLatencyMs.asStateFlow()
 
     fun publishSensorPacket(packet: SensorPacket) {
         mutableSensorPackets.tryEmit(packet)
-        packet.batteryPct?.let { mutableDeviceBattery.value = it }
+        mutableRadarDistance.value = packet.radarDist
+        mutableDeviceBattery.value = packet.batteryPct
     }
 
     fun publishImageFrame(jpegBytes: ByteArray) {
@@ -99,6 +106,21 @@ object VisionDataHub {
 
     fun updateAiServiceConfig(config: AiServiceConfig) {
         mutableAiServiceConfig.value = config
+    }
+
+    fun updateRemoteDeviceIp(ip: String?) {
+        mutableRemoteDeviceIp.value = ip
+    }
+
+    fun updateNetworkLatencyMs(latencyMs: Int?) {
+        mutableNetworkLatencyMs.value = latencyMs
+    }
+
+    fun clearConnectionRuntimeInfo() {
+        mutableRadarDistance.value = null
+        mutableRemoteDeviceIp.value = null
+        mutableNetworkLatencyMs.value = null
+        mutableDeviceBattery.value = null
     }
 }
 

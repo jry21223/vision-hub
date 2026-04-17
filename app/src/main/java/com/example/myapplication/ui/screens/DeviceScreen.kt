@@ -38,7 +38,11 @@ internal fun DeviceScreen(
     modifier: Modifier = Modifier,
 ) {
     val batteryPct by VisionDataHub.deviceBattery.collectAsStateWithLifecycle()
-    val metrics = remember(connectionState, batteryPct) { deviceMetrics(connectionState, batteryPct) }
+    val latencyMs by VisionDataHub.networkLatencyMs.collectAsStateWithLifecycle()
+    val remoteDeviceIp by VisionDataHub.remoteDeviceIp.collectAsStateWithLifecycle()
+    val metrics = remember(connectionState, batteryPct, latencyMs) {
+        deviceMetrics(connectionState, batteryPct, latencyMs)
+    }
 
     LazyColumn(
         modifier = modifier
@@ -64,7 +68,7 @@ internal fun DeviceScreen(
             )
         }
         item {
-            ConnectionConfigCard(port = 8080)
+            ConnectionConfigCard(port = 8080, remoteDeviceIp = remoteDeviceIp)
         }
         item {
             DeviceCoreCard(connectionState = connectionState, metrics = metrics)
