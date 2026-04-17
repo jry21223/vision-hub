@@ -7,6 +7,8 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.ui.graphics.Color
 import com.example.myapplication.ConnectionState
 import com.example.myapplication.FallAlertState
+import com.example.myapplication.FallDetectionConfig
+import com.example.myapplication.LocalVisionIssue
 import com.example.myapplication.LocalVisionState
 import com.example.myapplication.LocalVisionStatus
 import com.example.myapplication.ui.DangerRed
@@ -85,14 +87,11 @@ private fun formatRadarDistance(radarDistance: Int): String {
 
 private fun formatLatency(latencyMs: Int?): String = latencyMs?.let { "${it}ms" } ?: "--"
 
-internal fun obstacleSensitivityLabel(
-    connectionState: ConnectionState,
-    fallAlertState: FallAlertState,
-): String = when {
-    fallAlertState == FallAlertState.FALL_CONFIRMED ||
-        fallAlertState == FallAlertState.EMERGENCY_CALLING -> "紧急"
-    connectionState == ConnectionState.CONNECTED -> "高 (Ultra)"
-    else -> "待连接"
+internal fun obstacleSensitivityLabel(config: FallDetectionConfig): String = when (config) {
+    SensitivityPreference.LOW -> "低"
+    SensitivityPreference.MEDIUM -> "中"
+    SensitivityPreference.HIGH -> "高"
+    else -> "自定义"
 }
 
 internal fun obstacleActionSubtitle(
@@ -131,17 +130,23 @@ internal fun homeConnectionBannerSubtitle(connectionState: ConnectionState): Str
     }
 
 internal fun recognitionBannerTitle(state: LocalVisionState): String =
-    if (state.status == LocalVisionStatus.ERROR) {
-        "识别链路需要检查"
-    } else {
-        "系统状态正常，随时可以识别"
+    when {
+        state.issue == LocalVisionIssue.NO_NEW_FRAME -> "等待新图像帧"
+        state.status == LocalVisionStatus.ERROR && state.issue == LocalVisionIssue.INPUT_FRAME -> "输入图像异常"
+        state.status == LocalVisionStatus.ERROR && state.issue == LocalVisionIssue.MODEL_PIPELINE -> "模型推理异常"
+        state.status == LocalVisionStatus.ERROR -> "识别链路需要检查"
+        else -> "系统状态正常，随时可以识别"
     }
 
 internal fun recognitionResultTitle(state: LocalVisionState): String =
     when (state.status) {
         LocalVisionStatus.FRAME_ANALYZED ->
             state.summary.substringBefore('，').substringBefore('。').ifBlank { "药品识别完成" }
-        LocalVisionStatus.ERROR -> "识别异常"
+        LocalVisionStatus.ERROR -> when (state.issue) {
+            LocalVisionIssue.INPUT_FRAME -> "输入图像异常"
+            LocalVisionIssue.MODEL_PIPELINE -> "模型推理异常"
+            else -> "识别异常"
+        }
         LocalVisionStatus.PROCESSING -> "识别进行中"
         LocalVisionStatus.IDLE -> "等待拍照识别"
     }
@@ -149,9 +154,17 @@ internal fun recognitionResultTitle(state: LocalVisionState): String =
 internal fun recognitionResultDosage(state: LocalVisionState): String =
     when (state.status) {
         LocalVisionStatus.FRAME_ANALYZED -> "请按标签说明服用"
-        LocalVisionStatus.ERROR -> "请检查模型资源或图像输入"
+        LocalVisionStatus.ERROR -> when (state.issue) {
+            LocalVisionIssue.INPUT_FRAME -> "请重新拍摄或检查 JPEG 帧传输"
+            LocalVisionIssue.MODEL_PIPELINE -> "请检查模型资源与标签配置"
+            else -> "请检查识别链路"
+        }
         LocalVisionStatus.PROCESSING -> "正在执行本地模型推理与摘要生成"
-        LocalVisionStatus.IDLE -> "1粒/次，一日三次"
+        LocalVisionStatus.IDLE -> if (state.issue == LocalVisionIssue.NO_NEW_FRAME) {
+            "连接设备后将自动恢复识别"
+        } else {
+            "请拍摄药盒开始识别"
+        }
     }
 
 internal fun historyTitle(
@@ -168,7 +181,7 @@ internal fun historyDetail(localVisionState: LocalVisionState): String =
         LocalVisionStatus.FRAME_ANALYZED -> localVisionState.summary
         LocalVisionStatus.PROCESSING -> "正在分析最新画面"
         LocalVisionStatus.ERROR -> localVisionState.summary
-        LocalVisionStatus.IDLE -> "等待图像帧"
+        LocalVisionStatus.IDLE -> localVisionState.summary
     }
 
 internal fun filterHistoryRecords(
@@ -248,10 +261,18 @@ internal fun fallAlertDescription(state: FallAlertState): String =
 
 internal fun recognitionSupportingText(state: LocalVisionState): String =
     when (state.status) {
-        LocalVisionStatus.IDLE -> "等待来自眼镜端的最新图像帧"
+        LocalVisionStatus.IDLE -> if (state.issue == LocalVisionIssue.NO_NEW_FRAME) {
+            "当前暂无新图像帧，收到新画面后会自动恢复"
+        } else {
+            "等待来自眼镜端的最新图像帧"
+        }
         LocalVisionStatus.PROCESSING -> "正在执行本地模型推理与摘要生成"
         LocalVisionStatus.FRAME_ANALYZED -> "识别完成，可直接用于语音播报"
-        LocalVisionStatus.ERROR -> "请检查模型资源或图像输入格式"
+        LocalVisionStatus.ERROR -> when (state.issue) {
+            LocalVisionIssue.INPUT_FRAME -> "检测到图像帧损坏或解码失败"
+            LocalVisionIssue.MODEL_PIPELINE -> "本地模型或标签配置需要检查"
+            else -> "请检查模型资源或图像输入格式"
+        }
     }
 
 internal fun obstacleHeadline(

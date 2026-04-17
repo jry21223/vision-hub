@@ -1,7 +1,9 @@
 package com.example.myapplication
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -76,43 +78,6 @@ class YoloInferenceManagerTest {
     }
 
     @Test
-    fun `buildLocalVisionSummary reports medicine box location and crop success`() {
-        val medicineBox = YoloDetection(
-            label = MEDICINE_BOX_LABEL,
-            confidence = 0.88f,
-            left = 130f,
-            top = 90f,
-            right = 220f,
-            bottom = 180f,
-        )
-
-        assertEquals(
-            "药盒位于画面中央，距离中等，已截取文本区域",
-            buildLocalVisionSummary(
-                medicineBox = medicineBox,
-                frameWidth = 320,
-                frameHeight = 320,
-                hasTextRegion = true,
-                textRegionCropSucceeded = true,
-            ),
-        )
-    }
-
-    @Test
-    fun `buildLocalVisionSummary reports missing medicine box`() {
-        assertEquals(
-            "未检测到药盒，未检测到文本区域",
-            buildLocalVisionSummary(
-                medicineBox = null,
-                frameWidth = 320,
-                frameHeight = 320,
-                hasTextRegion = false,
-                textRegionCropSucceeded = false,
-            ),
-        )
-    }
-
-    @Test
     fun `parseModelClassLabels parses indexed metadata map`() {
         assertEquals(
             listOf(MEDICINE_BOX_LABEL, TEXT_REGION_LABEL),
@@ -121,8 +86,47 @@ class YoloInferenceManagerTest {
     }
 
     @Test
+    fun `modelClassLabelsIssue reports missing metadata labels`() {
+        assertEquals("模型缺少类别标签元数据", modelClassLabelsIssue(emptyList()))
+    }
+
+    @Test
+    fun `modelClassLabelsIssue accepts labeled models`() {
+        assertNull(modelClassLabelsIssue(listOf(MEDICINE_BOX_LABEL, TEXT_REGION_LABEL)))
+    }
+
+    @Test
     fun `supportsRequiredClassLabels requires medicine box and text region`() {
         assertTrue(supportsRequiredClassLabels(listOf(MEDICINE_BOX_LABEL, TEXT_REGION_LABEL)))
+    }
+
+    @Test
+    fun `summarizeDetections reports top generic labels in compatibility mode`() {
+        val detections = listOf(
+            YoloDetection(
+                label = "bottle",
+                confidence = 0.91f,
+                left = 10f,
+                top = 12f,
+                right = 100f,
+                bottom = 180f,
+            ),
+            YoloDetection(
+                label = "cup",
+                confidence = 0.78f,
+                left = 120f,
+                top = 30f,
+                right = 200f,
+                bottom = 160f,
+            ),
+        )
+
+        assertEquals("检测到 bottle、cup", summarizeDetections(detections))
+    }
+
+    @Test
+    fun `summarizeDetections reports no objects when detections empty`() {
+        assertEquals("未检测到已知目标", summarizeDetections(emptyList()))
     }
 
     @Test
@@ -166,13 +170,35 @@ class YoloInferenceManagerTest {
     }
 
     @Test
-    fun `parseDetections returns empty when labels missing`() {
-        assertEquals(
-            emptyList<YoloDetection>(),
-            parseDetections(
-                rawOutput = arrayOf(arrayOf(floatArrayOf(1f, 2f, 3f, 4f, 0.9f))),
-                classLabels = emptyList(),
-            ),
+    fun `resolveClassLabels uses metadata labels when present`() {
+        val labels = resolveClassLabels(
+            metadataLabels = listOf(MEDICINE_BOX_LABEL, TEXT_REGION_LABEL),
         )
+
+        assertEquals(listOf(MEDICINE_BOX_LABEL, TEXT_REGION_LABEL), labels)
+    }
+
+    @Test
+    fun `resolveClassLabels keeps metadata empty without explicit labels`() {
+        val labels = resolveClassLabels(
+            metadataLabels = emptyList(),
+        )
+
+        assertTrue(labels.isEmpty())
+    }
+
+    @Test
+    fun `supportsRequiredClassLabels rejects models missing text region`() {
+        assertFalse(supportsRequiredClassLabels(listOf(MEDICINE_BOX_LABEL)))
+    }
+
+    @Test
+    fun `supportsRequiredClassLabels rejects models missing medicine box`() {
+        assertFalse(supportsRequiredClassLabels(listOf(TEXT_REGION_LABEL)))
+    }
+
+    @Test
+    fun `supportsRequiredClassLabels does not block compatibility mode`() {
+        assertFalse(supportsRequiredClassLabels(listOf("person", "bottle", "cup")))
     }
 }

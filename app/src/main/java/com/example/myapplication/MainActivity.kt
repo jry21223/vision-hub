@@ -85,6 +85,7 @@ import com.example.myapplication.util.ContactPreference
 import com.example.myapplication.util.UserPreference
 import com.example.myapplication.util.AiServicePreference
 import com.example.myapplication.api.RetrofitClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -167,6 +168,12 @@ internal fun VisionHubScreen(
         }
         VisionDataHub.updateUserProfile(profile)
 
+        // 加载跌倒检测灵敏度配置
+        val savedFallConfig = withContext(Dispatchers.IO) {
+            SensitivityPreference.load(context)
+        }
+        VisionDataHub.updateFallConfig(savedFallConfig)
+
         // 加载 AI 服务配置
         val aiConfig = withContext(Dispatchers.IO) {
             AiServicePreference.load(context)
@@ -193,6 +200,8 @@ internal fun VisionHubScreen(
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w("MainActivity", "Failed to sync user profile from server", e)
             }

@@ -10,10 +10,9 @@ import java.nio.FloatBuffer
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 
 internal const val MEDICINE_BOX_LABEL = "Medicine_Box"
@@ -55,24 +54,21 @@ internal object YoloInferenceManager {
 
     suspend fun analyze(context: Context, jpegBytes: ByteArray): LocalVisionState {
         return withContext(Dispatchers.Default) {
+            if (!hasValidJpegMarkers(jpegBytes)) {
+                return@withContext inputFrameError("输入图像无法解码")
+            }
+
             runCatching {
                 val sourceBitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
-                    ?: return@withContext LocalVisionState(
-                        status = LocalVisionStatus.ERROR,
-                        summary = "图像帧解码失败",
-                        result = null,
-                    )
+                    ?: return@withContext inputFrameError("输入图像无法解码")
 
                 val holder = session(context.applicationContext)
-                if (!supportsRequiredClassLabels(holder.classLabels)) {
-                    return@withContext LocalVisionState(
-                        status = LocalVisionStatus.ERROR,
-                        summary = "模型标签不包含药盒或文本区域类别",
-                        result = null,
-                    )
+                val classLabelsIssue = modelClassLabelsIssue(holder.classLabels)
+                if (classLabelsIssue != null) {
+                    return@withContext modelPipelineError(classLabelsIssue)
                 }
+                val supportsBusinessLabels = supportsRequiredClassLabels(holder.classLabels)
 
-                // 并行执行 YOLO 检测和全图 OCR
                 val yoloDeferred = async {
                     runYoloDetection(holder, sourceBitmap)
                 }
@@ -82,6 +78,20 @@ internal object YoloInferenceManager {
 
                 val yoloResult = yoloDeferred.await()
                 val ocrResult = ocrDeferred.await()
+
+                if (!supportsBusinessLabels) {
+                    return@withContext LocalVisionState(
+                        status = LocalVisionStatus.FRAME_ANALYZED,
+                        summary = summarizeDetections(yoloResult.detections),
+                        result = VisionAnalysisResult(
+                            hasMedicineBox = false,
+                            medicineBoxLocation = null,
+                            medicineBoxAreaRatio = null,
+                            ocrText = ocrResult?.text,
+                            hasOcrContent = ocrResult?.text?.isNotBlank() == true,
+                        ),
+                    )
+                }
 
                 val result = VisionAnalysisResult(
                     hasMedicineBox = yoloResult.medicineBox != null,
@@ -101,16 +111,13 @@ internal object YoloInferenceManager {
                     result = result,
                 )
             }.getOrElse { error ->
-                LocalVisionState(
-                    status = LocalVisionStatus.ERROR,
-                    summary = error.message ?: "本地视觉推理失败",
-                    result = null,
-                )
+                modelPipelineError(error.message ?: "本地视觉推理失败")
             }
         }
     }
 
     private data class YoloResult(
+        val detections: List<YoloDetection>,
         val medicineBox: YoloDetection?,
         val textRegion: YoloDetection?,
     )
@@ -123,7 +130,11 @@ internal object YoloInferenceManager {
         val detections = runInference(holder, preparedFrame.tensorData)
         val medicineBox = selectHighestConfidenceDetection(detections, MEDICINE_BOX_LABEL)
         val textRegion = selectHighestConfidenceDetection(detections, TEXT_REGION_LABEL)
-        return YoloResult(medicineBox = medicineBox, textRegion = textRegion)
+        return YoloResult(
+            detections = detections,
+            medicineBox = medicineBox,
+            textRegion = textRegion,
+        )
     }
 
     private fun calculateAreaRatio(
@@ -155,26 +166,44 @@ internal object YoloInferenceManager {
             environment = environment,
             session = session,
             inputName = inputName,
-            classLabels = loadClassLabels(session),
+            classLabels = resolveClassLabels(
+                metadataLabels = loadMetadataClassLabels(session),
+            ),
         )
     }
 
-    private fun loadClassLabels(session: OrtSession): List<String> {
+    private fun loadMetadataClassLabels(session: OrtSession): List<String> {
         val metadata = runCatching { session.metadata.customMetadata }.getOrDefault(emptyMap())
         return MODEL_NAMES_METADATA_KEYS
             .asSequence()
             .mapNotNull(metadata::get)
             .map(::parseModelClassLabels)
             .firstOrNull { it.isNotEmpty() }
-            ?: DEFAULT_CLASS_LABELS
+            ?: emptyList()
     }
 
     private fun runInference(holder: SessionHolder, tensorData: FloatArray): List<YoloDetection> {
+        return parseDetections(
+            rawOutput = runInferenceOutput(
+                environment = holder.environment,
+                session = holder.session,
+                inputName = holder.inputName,
+                tensorData = tensorData,
+            ),
+            classLabels = holder.classLabels,
+        )
+    }
+
+    private fun runInferenceOutput(
+        environment: OrtEnvironment,
+        session: OrtSession,
+        inputName: String,
+        tensorData: FloatArray,
+    ): Any? {
         val shape = longArrayOf(1, RGB_CHANNEL_COUNT.toLong(), MODEL_SIZE.toLong(), MODEL_SIZE.toLong())
-        return OnnxTensor.createTensor(holder.environment, FloatBuffer.wrap(tensorData), shape).use { tensor ->
-            holder.session.run(mapOf(holder.inputName to tensor)).use { outputs ->
-                val outputTensor = outputs.firstOrNull() as? OnnxTensor ?: return@use emptyList()
-                parseDetections(outputTensor.value, holder.classLabels)
+        return OnnxTensor.createTensor(environment, FloatBuffer.wrap(tensorData), shape).use { tensor ->
+            session.run(mapOf(inputName to tensor)).use { outputs ->
+                (outputs.firstOrNull() as? OnnxTensor)?.value
             }
         }
     }
@@ -206,6 +235,36 @@ internal object YoloInferenceManager {
     private data class PreparedFrame(
         val tensorData: FloatArray,
     )
+
+    private fun inputFrameError(summary: String): LocalVisionState {
+        return LocalVisionState(
+            status = LocalVisionStatus.ERROR,
+            summary = summary,
+            result = null,
+            issue = LocalVisionIssue.INPUT_FRAME,
+        )
+    }
+
+    private fun modelPipelineError(summary: String): LocalVisionState {
+        return LocalVisionState(
+            status = LocalVisionStatus.ERROR,
+            summary = summary,
+            result = null,
+            issue = LocalVisionIssue.MODEL_PIPELINE,
+        )
+    }
+
+    private fun hasValidJpegMarkers(jpegBytes: ByteArray): Boolean {
+        if (jpegBytes.size < 4) {
+            return false
+        }
+        val startsWithSoi =
+            jpegBytes[0] == 0xFF.toByte() && jpegBytes[1] == 0xD8.toByte()
+        val endsWithEoi =
+            jpegBytes[jpegBytes.lastIndex - 1] == 0xFF.toByte() &&
+                jpegBytes[jpegBytes.lastIndex] == 0xD9.toByte()
+        return startsWithSoi && endsWithEoi
+    }
 }
 
 internal fun parseModelClassLabels(serializedNames: String?): List<String> {
@@ -231,8 +290,23 @@ internal fun parseModelClassLabels(serializedNames: String?): List<String> {
         .toList()
 }
 
+internal fun modelClassLabelsIssue(classLabels: List<String>): String? {
+    return if (classLabels.isEmpty()) {
+        "模型缺少类别标签元数据"
+    } else {
+        null
+    }
+}
+
 internal fun supportsRequiredClassLabels(classLabels: List<String>): Boolean {
     return REQUIRED_CLASS_LABELS.all(classLabels::contains)
+}
+
+internal fun resolveClassLabels(metadataLabels: List<String>): List<String> {
+    if (metadataLabels.isNotEmpty()) {
+        return metadataLabels
+    }
+    return emptyList()
 }
 
 internal fun parseDetections(rawOutput: Any?, classLabels: List<String>): List<YoloDetection> {
@@ -454,6 +528,18 @@ internal fun cropTextRegion(
     }.getOrNull()
 }
 
+internal fun summarizeDetections(detections: List<YoloDetection>): String {
+    if (detections.isEmpty()) {
+        return "未检测到已知目标"
+    }
+    val topLabels = detections
+        .sortedByDescending(YoloDetection::confidence)
+        .map(YoloDetection::label)
+        .distinct()
+        .take(3)
+    return "检测到 ${topLabels.joinToString("、")}"
+}
+
 internal fun buildVisionSummary(result: VisionAnalysisResult): String {
     val yoloSummary = if (result.hasMedicineBox) {
         "药盒位于${result.medicineBoxLocation}"
@@ -472,24 +558,4 @@ internal fun buildVisionSummary(result: VisionAnalysisResult): String {
     } else {
         yoloSummary
     }
-}
-
-internal fun buildLocalVisionSummary(
-    medicineBox: YoloDetection?,
-    frameWidth: Int,
-    frameHeight: Int,
-    hasTextRegion: Boolean,
-    textRegionCropSucceeded: Boolean,
-): String {
-    val medicineSummary = if (medicineBox == null) {
-        "未检测到药盒"
-    } else {
-        "药盒位于${describeRelativeLocation(medicineBox, frameWidth, frameHeight)}"
-    }
-    val textSummary = when {
-        !hasTextRegion -> "未检测到文本区域"
-        textRegionCropSucceeded -> "已截取文本区域"
-        else -> "文本区域截取失败"
-    }
-    return "$medicineSummary，$textSummary"
 }

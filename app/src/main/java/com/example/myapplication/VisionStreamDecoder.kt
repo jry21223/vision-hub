@@ -1,6 +1,7 @@
 package com.example.myapplication
 
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
 
 class VisionStreamDecoder {
@@ -43,7 +44,8 @@ class VisionStreamDecoder {
             return
         }
 
-        onSensorPacket(parseSensorPacket(frame))
+        runCatching { parseSensorPacket(frame) }
+            .onSuccess(onSensorPacket)
     }
 
     private fun parseSensorPacket(frame: String): SensorPacket {
@@ -104,13 +106,13 @@ class VisionStreamDecoder {
         while (currentByte != END_OF_STREAM) {
             output.write(currentByte)
             if (previousByte == JPEG_MARKER_PREFIX && currentByte == JPEG_EOI_SUFFIX) {
-                break
+                return output.toByteArray()
             }
             previousByte = currentByte
             currentByte = input.read()
         }
 
-        return output.toByteArray()
+        throw IOException("Incomplete JPEG frame")
     }
 
     private companion object {

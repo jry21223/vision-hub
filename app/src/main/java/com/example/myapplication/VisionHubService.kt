@@ -7,15 +7,22 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class VisionHubService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var wakeLock: PowerManager.WakeLock? = null
+
+    @Volatile
+    private var lastImageFrameAtMillis = 0L
 
     @Volatile
     private var fallDetectionEngine = FallDetectionEngine()
@@ -44,6 +51,7 @@ class VisionHubService : Service() {
         observeFallConfig()
         observeSensorPackets()
         observeImageFrames()
+        observeRecognitionState()
         latencyMonitor.start()
         tcpServer.start()
     }
@@ -117,6 +125,7 @@ class VisionHubService : Service() {
         serviceScope.launch {
             VisionDataHub.imageFrames.collect { frame ->
                 if (!VisionDataHub.obstacleEnabled.value) return@collect
+                lastImageFrameAtMillis = SystemClock.elapsedRealtime()
                 VisionDataHub.updateLocalVisionState(LocalVisionState.PROCESSING)
                 val result = localVisionAnalyzer.analyze(this@VisionHubService, frame)
                 VisionDataHub.updateLocalVisionState(result)
@@ -124,9 +133,61 @@ class VisionHubService : Service() {
         }
     }
 
+    private fun observeRecognitionState() {
+        serviceScope.launch {
+            VisionDataHub.connectionState.collectLatest { state ->
+                if (state != ConnectionState.CONNECTED) {
+                    lastImageFrameAtMillis = 0L
+                    VisionDataHub.updateLocalVisionState(LocalVisionState.waitingForNewFrame())
+                }
+            }
+        }
+
+        serviceScope.launch {
+            VisionDataHub.obstacleEnabled.collectLatest { enabled ->
+                if (!enabled) {
+                    lastImageFrameAtMillis = 0L
+                    VisionDataHub.updateLocalVisionState(LocalVisionState.waitingForNewFrame())
+                    return@collectLatest
+                }
+
+                while (isActive && VisionDataHub.obstacleEnabled.value) {
+                    delay(NO_NEW_FRAME_TIMEOUT_MILLIS)
+                    if (VisionDataHub.connectionState.value != ConnectionState.CONNECTED) {
+                        lastImageFrameAtMillis = 0L
+                        VisionDataHub.updateLocalVisionState(LocalVisionState.waitingForNewFrame())
+                        continue
+                    }
+                    val lastFrameAtMillis = lastImageFrameAtMillis
+                    if (lastFrameAtMillis == 0L) {
+                        VisionDataHub.updateLocalVisionState(LocalVisionState.waitingForNewFrame())
+                        continue
+                    }
+                    val frameAgeMillis = SystemClock.elapsedRealtime() - lastFrameAtMillis
+                    if (frameAgeMillis < NO_NEW_FRAME_TIMEOUT_MILLIS) {
+                        continue
+                    }
+                    val currentState = VisionDataHub.localVisionState.value
+                    if (!shouldSwitchToWaitingForNewFrame(currentState)) {
+                        continue
+                    }
+                    VisionDataHub.updateLocalVisionState(currentState.waitingForNextFrame())
+                }
+            }
+        }
+    }
+
+    private fun shouldSwitchToWaitingForNewFrame(state: LocalVisionState): Boolean {
+        return when (state.issue) {
+            LocalVisionIssue.MODEL_PIPELINE -> false
+            else -> state.status != LocalVisionStatus.PROCESSING
+        }
+    }
+
     companion object {
         private const val WAKE_LOCK_TAG = "com.example.myapplication:VisionHubWakeLock"
         private const val FOREGROUND_SERVICE_TYPES =
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        private const val NO_NEW_FRAME_TIMEOUT_MILLIS = 3_000L
     }
 }

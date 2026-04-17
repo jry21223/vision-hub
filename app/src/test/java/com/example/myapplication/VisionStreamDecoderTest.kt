@@ -1,5 +1,6 @@
 package com.example.myapplication
 
+import java.io.IOException
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -53,6 +54,45 @@ class VisionStreamDecoderTest {
 
         assertEquals(1, sensorPackets.size)
         assertEquals(null, sensorPackets.single().batteryPct)
+    }
+
+    @Test
+    fun `decode skips malformed json and continues reading later sensor packet`() {
+        val sensorPackets = mutableListOf<SensorPacket>()
+        val payload = "{bad json}\n".encodeToByteArray() +
+            sensorJson(radarDist = 40, btnA = 1, btnB = 0).encodeToByteArray()
+
+        decoder.decode(
+            input = payload.inputStream(),
+            onSensorPacket = { packet -> sensorPackets.add(packet) },
+            onImageFrame = { error("Did not expect image frame") },
+        )
+
+        assertEquals(1, sensorPackets.size)
+        assertEquals(40, sensorPackets.single().radarDist)
+        assertEquals(1, sensorPackets.single().btnA)
+        assertEquals(0, sensorPackets.single().btnB)
+    }
+
+    @Test
+    fun `decode throws when jpeg frame is truncated before end marker`() {
+        val truncatedJpeg = byteArrayOf(
+            0xFF.toByte(),
+            0xD8.toByte(),
+            0x01,
+            0x23,
+            0x45,
+        )
+
+        val error = org.junit.Assert.assertThrows(IOException::class.java) {
+            decoder.decode(
+                input = truncatedJpeg.inputStream(),
+                onSensorPacket = { error("Did not expect sensor frame") },
+                onImageFrame = { error("Did not expect image frame callback") },
+            )
+        }
+
+        assertEquals("Incomplete JPEG frame", error.message)
     }
 
     @Test

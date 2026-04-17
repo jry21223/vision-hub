@@ -96,13 +96,13 @@ internal fun SettingsGroupCard(
             )
             SettingsRow(
                 icon = Icons.Filled.Visibility,
-                title = "避障灵敏度",
+                title = "跌倒检测灵敏度",
                 onClick = onObstacleSensitivity,
             )
             SettingsRow(
                 icon = Icons.Filled.RecordVoiceOver,
                 title = "软件版本",
-                value = "v2.4.0",
+                value = "v1.1.1",
             )
         }
     }

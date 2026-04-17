@@ -6,10 +6,16 @@ import com.example.myapplication.util.connectionStatusText
 import com.example.myapplication.util.fallAlertDescription
 import com.example.myapplication.util.fallAlertTitle
 import com.example.myapplication.util.filterHistoryRecords
+import com.example.myapplication.util.localVisionStatusText
 import com.example.myapplication.util.obstacleDangerHeadline
 import com.example.myapplication.util.obstacleMetrics
 import com.example.myapplication.util.deviceMetrics
-import com.example.myapplication.util.localVisionStatusText
+import com.example.myapplication.util.obstacleSensitivityLabel
+import com.example.myapplication.util.recognitionBannerTitle
+import com.example.myapplication.util.recognitionResultDosage
+import com.example.myapplication.util.recognitionResultTitle
+import com.example.myapplication.util.recognitionSupportingText
+import com.example.myapplication.util.SensitivityPreference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -62,6 +68,81 @@ class ExampleUnitTest {
 
         assertEquals("--", metrics.first { it.label == "响应延迟" }.value)
         assertEquals("51%", metrics.first { it.label == "剩余电量" }.value)
+    }
+
+    @Test
+    fun `obstacleSensitivityLabel maps low medium high and custom configs`() {
+        assertEquals("低", obstacleSensitivityLabel(SensitivityPreference.LOW))
+        assertEquals("中", obstacleSensitivityLabel(SensitivityPreference.MEDIUM))
+        assertEquals("高", obstacleSensitivityLabel(SensitivityPreference.HIGH))
+        assertEquals(
+            "自定义",
+            obstacleSensitivityLabel(
+                FallDetectionConfig(
+                    freeFallThreshold = 2.3,
+                    impactThreshold = 16.0,
+                    impactWindowMillis = 1_100L,
+                    cooldownMillis = 9_000L,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `recognition copy reflects input frame issue`() {
+        val state = LocalVisionState(
+            status = LocalVisionStatus.ERROR,
+            summary = "输入图像无法解码",
+            issue = LocalVisionIssue.INPUT_FRAME,
+        )
+
+        assertEquals("输入图像异常", recognitionBannerTitle(state))
+        assertEquals("输入图像异常", recognitionResultTitle(state))
+        assertEquals("请重新拍摄或检查 JPEG 帧传输", recognitionResultDosage(state))
+        assertEquals("检测到图像帧损坏或解码失败", recognitionSupportingText(state))
+    }
+
+    @Test
+    fun `recognition copy reflects model pipeline issue`() {
+        val state = LocalVisionState(
+            status = LocalVisionStatus.ERROR,
+            summary = "模型缺少类别标签元数据",
+            issue = LocalVisionIssue.MODEL_PIPELINE,
+        )
+
+        assertEquals("模型推理异常", recognitionBannerTitle(state))
+        assertEquals("模型推理异常", recognitionResultTitle(state))
+        assertEquals("请检查模型资源与标签配置", recognitionResultDosage(state))
+        assertEquals("本地模型或标签配置需要检查", recognitionSupportingText(state))
+    }
+
+    @Test
+    fun `recognition copy reflects waiting for new frame issue`() {
+        val state = LocalVisionState(
+            status = LocalVisionStatus.IDLE,
+            summary = "等待新图像帧",
+            issue = LocalVisionIssue.NO_NEW_FRAME,
+        )
+
+        assertEquals("等待新图像帧", recognitionBannerTitle(state))
+        assertEquals("等待拍照识别", recognitionResultTitle(state))
+        assertEquals("连接设备后将自动恢复识别", recognitionResultDosage(state))
+        assertEquals("当前暂无新图像帧，收到新画面后会自动恢复", recognitionSupportingText(state))
+    }
+
+    @Test
+    fun `localVisionState waitingForNextFrame preserves model pipeline issue`() {
+        val state = LocalVisionState(
+            status = LocalVisionStatus.ERROR,
+            summary = "模型标签不包含药盒或文本区域类别",
+            issue = LocalVisionIssue.MODEL_PIPELINE,
+        )
+
+        val next = state.waitingForNextFrame()
+
+        assertEquals(LocalVisionStatus.ERROR, next.status)
+        assertEquals(LocalVisionIssue.MODEL_PIPELINE, next.issue)
+        assertEquals("模型标签不包含药盒或文本区域类别", next.summary)
     }
 
     @Test

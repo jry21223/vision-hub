@@ -17,13 +17,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.myapplication.VisionDataHub
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.myapplication.ConnectionState
 import com.example.myapplication.FallAlertState
+import com.example.myapplication.VisionDataHub
 import com.example.myapplication.ui.DangerRed
 import com.example.myapplication.ui.PrimaryText
 import com.example.myapplication.ui.ScreenBackground
@@ -57,6 +57,7 @@ internal fun ObstacleScreen(
     val batteryPct by VisionDataHub.deviceBattery.collectAsStateWithLifecycle()
     val radarDistance by VisionDataHub.radarDistance.collectAsStateWithLifecycle()
     val latencyMs by VisionDataHub.networkLatencyMs.collectAsStateWithLifecycle()
+    val fallConfig by VisionDataHub.fallConfig.collectAsStateWithLifecycle()
     val metrics = remember(connectionState, fallAlertState, batteryPct, latencyMs) {
         obstacleMetrics(connectionState, fallAlertState, batteryPct, latencyMs)
     }
@@ -125,8 +126,8 @@ internal fun ObstacleScreen(
         }
         item {
             SettingPill(
-                title = "灵敏度设置",
-                value = obstacleSensitivityLabel(connectionState, fallAlertState),
+                title = "跌倒检测灵敏度",
+                value = obstacleSensitivityLabel(fallConfig),
                 icon = Icons.Filled.Tune,
                 onClick = onSensitivityClick,
             )
