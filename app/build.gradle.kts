@@ -33,21 +33,20 @@ android {
     signingConfigs {
         create("release") {
             storeFile = localProperties.getProperty("SIGNING_STORE_FILE")?.let { file(it) }
-                ?: file("visionhub-release.keystore")
-            storePassword = localProperties.getProperty("SIGNING_STORE_PASSWORD") ?: "visionhub2024"
-            keyAlias = localProperties.getProperty("SIGNING_KEY_ALIAS") ?: "visionhub"
-            keyPassword = localProperties.getProperty("SIGNING_KEY_PASSWORD") ?: "visionhub2024"
+            storePassword = localProperties.getProperty("SIGNING_STORE_PASSWORD")
+            keyAlias = localProperties.getProperty("SIGNING_KEY_ALIAS")
+            keyPassword = localProperties.getProperty("SIGNING_KEY_PASSWORD")
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            val signingStoreFile = localProperties.getProperty("SIGNING_STORE_FILE")
+            if (signingStoreFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
@@ -59,6 +58,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     sourceSets {
         getByName("main") {

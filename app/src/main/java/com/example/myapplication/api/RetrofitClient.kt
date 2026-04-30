@@ -1,5 +1,6 @@
 package com.example.myapplication.api
 
+import com.example.myapplication.BuildConfig
 import com.example.myapplication.auth.AuthTokenHolder
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -31,7 +32,7 @@ object RetrofitClient {
     private val okHttpClient: OkHttpClient by lazy {
         val builder = OkHttpClient.Builder()
         builder.addInterceptor(AuthInterceptor())
-        if (com.example.myapplication.BuildConfig.DEBUG) {
+        if (BuildConfig.DEBUG) {
             val loggingInterceptor = HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BASIC
             }
