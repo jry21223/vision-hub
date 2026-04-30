@@ -37,6 +37,7 @@ class VisionHubService : Service() {
     override fun onCreate() {
         super.onCreate()
         NotificationHelper.createChannel(this)
+        NotificationHelper.createAlertChannel(this)
         VisionDataHub.updateConnectionState(ConnectionState.STARTING)
         VisionDataHub.updateFallAlertState(FallAlertState.IDLE)
         VisionDataHub.updateLocalVisionState(LocalVisionState.IDLE)

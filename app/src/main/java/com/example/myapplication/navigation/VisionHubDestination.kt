@@ -3,6 +3,7 @@ package com.example.myapplication.navigation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.Elderly
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Visibility
@@ -20,4 +21,5 @@ internal enum class VisionHubDestination(
     DEVICE("设备", Icons.Outlined.Devices),
     PROFILE("我的", Icons.Outlined.AccountCircle),
     HISTORY("历史记录", Icons.Outlined.History, showInBottomBar = false),
+    ELDERLY("老人信息", Icons.Outlined.Elderly, showInBottomBar = false),
 }

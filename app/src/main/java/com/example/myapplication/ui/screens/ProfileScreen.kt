@@ -16,6 +16,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Elderly
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
@@ -61,6 +62,7 @@ internal fun ProfileScreen(
     onOpenHistory: () -> Unit = {},
     onObstacleSensitivity: () -> Unit = {},
     onLogout: () -> Unit = {},
+    onElderlyProfile: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -100,6 +102,18 @@ internal fun ProfileScreen(
                                 withContext(Dispatchers.IO) {
                                     ContactPreference.save(context, trimmed)
                                 }
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        RetrofitClient.userProfileApi.updateUserProfile(
+                                            userId = userProfile.userId,
+                                            request = com.example.myapplication.UpdateProfileRequest(
+                                                displayName = userProfile.displayName,
+                                                avatarInitial = userProfile.avatarInitial,
+                                                emergencyPhone = trimmed,
+                                            )
+                                        )
+                                    }
+                                } catch (_: Exception) {}
                             }
                         }
                         showEditContactDialog = false
@@ -245,6 +259,13 @@ internal fun ProfileScreen(
                 title = "查看历史记录",
                 icon = Icons.Filled.History,
                 onClick = onOpenHistory,
+            )
+        }
+        item {
+            PrimaryListAction(
+                title = "老人信息管理",
+                icon = Icons.Filled.Elderly,
+                onClick = onElderlyProfile,
             )
         }
         item {

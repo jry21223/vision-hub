@@ -12,4 +12,6 @@ data class SensorPacket(
     val btnA: Int,
     val btnB: Int,
     val batteryPct: Int? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
 )

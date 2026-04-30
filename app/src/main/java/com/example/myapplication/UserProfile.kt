@@ -30,4 +30,5 @@ data class UserProfileData(
 data class UpdateProfileRequest(
     val displayName: String,
     val avatarInitial: String,
+    val emergencyPhone: String? = null,
 )

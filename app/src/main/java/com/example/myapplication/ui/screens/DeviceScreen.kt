@@ -22,6 +22,7 @@ import com.example.myapplication.ui.SuccessGreen
 import com.example.myapplication.ui.SuccessText
 import com.example.myapplication.ui.components.AppWordmark
 import com.example.myapplication.ui.components.ConnectionConfigCard
+import com.example.myapplication.ui.components.DeviceBindingCard
 import com.example.myapplication.ui.components.DeviceCoreCard
 import com.example.myapplication.ui.components.FinderCard
 import com.example.myapplication.ui.components.GuardianLocationCard
@@ -40,6 +41,8 @@ internal fun DeviceScreen(
     val batteryPct by VisionDataHub.deviceBattery.collectAsStateWithLifecycle()
     val latencyMs by VisionDataHub.networkLatencyMs.collectAsStateWithLifecycle()
     val remoteDeviceIp by VisionDataHub.remoteDeviceIp.collectAsStateWithLifecycle()
+    val latitude by VisionDataHub.deviceLatitude.collectAsStateWithLifecycle()
+    val longitude by VisionDataHub.deviceLongitude.collectAsStateWithLifecycle()
     val metrics = remember(connectionState, batteryPct, latencyMs) {
         deviceMetrics(connectionState, batteryPct, latencyMs)
     }
@@ -71,10 +74,17 @@ internal fun DeviceScreen(
             ConnectionConfigCard(port = 8080, remoteDeviceIp = remoteDeviceIp)
         }
         item {
+            DeviceBindingCard()
+        }
+        item {
             DeviceCoreCard(connectionState = connectionState, metrics = metrics)
         }
         item {
-            GuardianLocationCard(connectionState = connectionState)
+            GuardianLocationCard(
+                connectionState = connectionState,
+                latitude = latitude,
+                longitude = longitude,
+            )
         }
         item {
             FinderCard(

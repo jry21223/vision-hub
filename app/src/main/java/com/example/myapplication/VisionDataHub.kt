@@ -1,5 +1,7 @@
 package com.example.myapplication
 
+import com.example.myapplication.api.AlertRecord
+import com.example.myapplication.api.OnlineDevice
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +37,12 @@ object VisionDataHub {
     private val mutableRadarDistance = MutableStateFlow<Int?>(null)
     private val mutableRemoteDeviceIp = MutableStateFlow<String?>(null)
     private val mutableNetworkLatencyMs = MutableStateFlow<Int?>(null)
+    private val mutableIsLoggedIn = MutableStateFlow(false)
+    private val mutableElderlyProfile = MutableStateFlow(ElderlyProfile())
+    private val mutableCloudAlerts = MutableStateFlow<List<AlertRecord>>(emptyList())
+    private val mutableBoundDevice = MutableStateFlow<OnlineDevice?>(null)
+    private val mutableDeviceLatitude = MutableStateFlow<Double?>(null)
+    private val mutableDeviceLongitude = MutableStateFlow<Double?>(null)
 
     val sensorPackets: SharedFlow<SensorPacket> = mutableSensorPackets.asSharedFlow()
     val imageFrames: SharedFlow<ByteArray> = mutableImageFrames.asSharedFlow()
@@ -51,11 +59,21 @@ object VisionDataHub {
     val radarDistance: StateFlow<Int?> = mutableRadarDistance.asStateFlow()
     val remoteDeviceIp: StateFlow<String?> = mutableRemoteDeviceIp.asStateFlow()
     val networkLatencyMs: StateFlow<Int?> = mutableNetworkLatencyMs.asStateFlow()
+    val isLoggedIn: StateFlow<Boolean> = mutableIsLoggedIn.asStateFlow()
+    val elderlyProfile: StateFlow<ElderlyProfile> = mutableElderlyProfile.asStateFlow()
+    val cloudAlerts: StateFlow<List<AlertRecord>> = mutableCloudAlerts.asStateFlow()
+    val boundDevice: StateFlow<OnlineDevice?> = mutableBoundDevice.asStateFlow()
+    val deviceLatitude: StateFlow<Double?> = mutableDeviceLatitude.asStateFlow()
+    val deviceLongitude: StateFlow<Double?> = mutableDeviceLongitude.asStateFlow()
 
     fun publishSensorPacket(packet: SensorPacket) {
         mutableSensorPackets.tryEmit(packet)
         mutableRadarDistance.value = packet.radarDist
         mutableDeviceBattery.value = packet.batteryPct
+        if (packet.latitude != null && packet.longitude != null) {
+            mutableDeviceLatitude.value = packet.latitude
+            mutableDeviceLongitude.value = packet.longitude
+        }
     }
 
     fun publishImageFrame(jpegBytes: ByteArray) {
@@ -107,6 +125,14 @@ object VisionDataHub {
     fun updateAiServiceConfig(config: AiServiceConfig) {
         mutableAiServiceConfig.value = config
     }
+
+    fun setLoggedIn(value: Boolean) { mutableIsLoggedIn.value = value }
+
+    fun updateElderlyProfile(profile: ElderlyProfile) { mutableElderlyProfile.value = profile }
+
+    fun updateCloudAlerts(alerts: List<AlertRecord>) { mutableCloudAlerts.value = alerts }
+
+    fun updateBoundDevice(device: OnlineDevice?) { mutableBoundDevice.value = device }
 
     fun updateRemoteDeviceIp(ip: String?) {
         mutableRemoteDeviceIp.value = ip
