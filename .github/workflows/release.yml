@@ -1,0 +1,59 @@
+name: Build & Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'zulu'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/vision-hub-${TAG}.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/debug/vision-hub-*.apk
+          generate_release_notes: true
+          body: |
+            ## 暖阳守护 VisionHub ${{ github.ref_name }}
+
+            ### 新增功能
+            - 用户注册 / 登录 / 找回密码（JWT 鉴权）
+            - 老人信息管理（姓名、年龄、性别、病史备注）
+            - 在线设备搜索与绑定 / 解绑
+            - 云端告警历史（摔倒 / 避障 / 药品识别）
+            - GPS 定位信息展示
+            - FCM 推送通知（弹窗 + 铃声双重提醒）
+            - 配置信息（紧急联系人 / 跌倒灵敏度）上传云端
+
+            ### 安装说明
+            1. 下载 `vision-hub-${{ github.ref_name }}.apk`
+            2. Android 设置 → 安全 → 允许安装未知来源应用
+            3. 打开 APK 文件安装
+            4. 首次启动请授予通话权限（紧急拨号）和通知权限
+
+            > **注意**：FCM 推送需配置 `google-services.json`，调试包默认已关闭自动初始化。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
