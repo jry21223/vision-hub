@@ -2,6 +2,9 @@ name: Build & Release APK
 
 on:
   push:
+    branches:
+      - android
+  push:
     tags:
       - 'v*'
   workflow_dispatch:
@@ -16,18 +19,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout android branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && 'android' || github.ref }}
+          ref: android
 
-      - name: Resolve tag name
+      - name: Resolve version tag
         id: tag
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "name=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
-          else
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            VER=$(grep 'versionName' app/build.gradle.kts | grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' | tr -d '"')
+            echo "name=v${VER}" >> $GITHUB_OUTPUT
           fi
 
       - name: Set up JDK 17
