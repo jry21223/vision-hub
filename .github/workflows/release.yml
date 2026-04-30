@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - android
-  push:
     tags:
       - 'v*'
   workflow_dispatch:
@@ -64,7 +63,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
-          name: 暖阳守护 VisionHub ${{ steps.tag.outputs.name }}
+          name: "暖阳守护 VisionHub ${{ steps.tag.outputs.name }}"
           files: app/build/outputs/apk/debug/vision-hub-${{ steps.tag.outputs.name }}.apk
           body: |
             ## 暖阳守护 VisionHub ${{ steps.tag.outputs.name }}
