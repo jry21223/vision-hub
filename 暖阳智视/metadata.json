@@ -1,0 +1,7 @@
+{
+  "name": "暖阳智视",
+  "description": "暖阳智视是一款专为视障人士设计的无障碍智能视觉辅助应用，提供实时避障、药品识别、设备管理及监护人定位等核心功能。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

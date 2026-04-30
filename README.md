@@ -1,311 +1,402 @@
-# Vision Hub
+# 暖阳智视 VisionHub
 
-这是一个运行在 Android 设备侧的视觉中枢应用，用于通过 TCP 接收传感器数据和图像帧，在本地执行跌倒检测，并在简洁的 Compose 界面上展示服务状态、连接状态和本地视觉状态。
+> 面向老年人与视障群体的可穿戴 AI 视觉中枢——ESP32 胸牌采集、Android 手机端侧推理、Go 后端事件持久化三层协作。
 
-## 当前能力
+---
 
-- 以前台服务方式在后台持续运行
-- 通过 TCP 接收传感器 JSON 帧和 JPEG 图像帧
-- 本地跌倒检测状态机处理 IMU 数据，并可尝试发起紧急呼叫
-- 本地视觉流水线消费 JPEG 字节流，并发布当前分析状态
-- 首页展示连接状态、本地视觉状态和跌倒告警状态
+## 目录
 
-## 技术栈
+- [产品定位](#产品定位)
+- [整体架构](#整体架构)
+- [各层详解](#各层详解)
+  - [ESP32 设备端](#1-esp32-设备端)
+  - [Android 手机端](#2-android-手机端)
+  - [Go 后端](#3-go-后端)
+  - [AI 模型管线](#4-ai-模型管线)
+- [数据流](#数据流)
+- [分支与目录结构](#分支与目录结构)
+- [快速开始](#快速开始)
+- [当前状态](#当前状态)
 
-- Kotlin
-- Android 单模块应用，使用 Gradle Kotlin DSL
-- Jetpack Compose + Material 3
-- Kotlin Coroutines + Flow
+---
 
-## 项目结构
+## 产品定位
 
-- `app/src/main/java/com/example/myapplication/MainActivity.kt` — 应用入口、权限请求和当前 UI
-- `app/src/main/java/com/example/myapplication/VisionHubService.kt` — 前台服务编排中心
-- `app/src/main/java/com/example/myapplication/VisionTcpServer.kt` — TCP 监听服务，默认端口 `8080`
-- `app/src/main/java/com/example/myapplication/VisionStreamDecoder.kt` — 解析换行 JSON 传感器帧和 JPEG 二进制帧
-- `app/src/main/java/com/example/myapplication/FallDetectionEngine.kt` — 跌倒检测状态机
-- `app/src/main/java/com/example/myapplication/LocalVisionAnalyzer.kt` — 当前本地图像分析器
-- `app/src/main/java/com/example/myapplication/VisionDataHub.kt` — 传感器 / 图像 / 状态的内存 Flow 中枢
+暖阳智视是一套**轻量可穿戴陪护系统**，目标用户是独居老人和视障人士。核心理念是：
 
-## 环境要求
+- **本地优先**：跌倒检测和药品目标定位全在手机端侧完成，无网络也能响应
+- **语音为主**：所有关键结果通过 TTS 朗读，不要求用户盯屏幕
+- **被动感知**：用户无需主动操作，胸牌持续上报传感器数据，手机后台处理
 
-- JDK 17（运行 Gradle / AGP 必须使用）
-- Android Studio 或 Android SDK 工具链
-- 可运行应用的真机或模拟器
+```
+场景举例：
+ 老人正在厨房，突然跌倒
+   → ESP32 胸牌 IMU 检测到异常加速度
+   → Android 跌倒检测状态机确认
+   → 自动拨打紧急联系人电话
+   → 后端记录跌倒事件（时间 / 位置 / IMU 数值）
+```
 
-执行 Gradle 命令前先切到 JDK 17：
+```
+场景举例：
+ 老人拿着一盒药，不认识药名
+   → 手机摄像头拍照
+   → YOLO 定位药盒区域和文字区域
+   → OCR 读取文字（后续接入云端 API）
+   → LLM 生成用药建议
+   → TTS 朗读给用户听
+```
+
+---
+
+## 整体架构
+
+```
+┌─────────────────────┐         ┌────────────────────────────────────────┐
+│   ESP32-S3 胸牌      │  TCP    │            Android 手机端               │
+│                     │ :8080   │                                        │
+│  IMU (ax/ay/az)     │ ──────▶ │  VisionHubService (前台服务)            │
+│  雷达测距            │         │  ├─ VisionTcpServer  ← TCP 接收        │
+│  摄像头 JPEG         │         │  │    └─ VisionStreamDecoder            │
+│  按钮 A/B            │ ◀────── │  ├─ FallDetectionEngine  状态机        │
+│  蜂鸣器/闪光灯       │ 命令下发 │  ├─ YoloInferenceManager  ONNX 推理   │
+└─────────────────────┘         │  └─ EmergencyCallHandler  紧急拨号     │
+                                 │                                        │
+                                 │  VisionDataHub (状态中枢)               │
+                                 │  Jetpack Compose UI (6 个页面)         │
+                                 └──────────────┬─────────────────────────┘
+                                                │  HTTP (待接入)
+                                                ▼
+                                 ┌──────────────────────────────┐
+                                 │        Go 后端  :3000         │
+                                 │  Fiber v2  REST API           │
+                                 │  ├─ POST /event/report        │
+                                 │  └─ POST /recognize/medicine  │
+                                 └──────┬───────────────┬────────┘
+                                        │               │
+                                 ┌──────▼──────┐  ┌─────▼──────────┐
+                                 │    Redis    │  │  Redpanda       │
+                                 │   (缓存)    │  │  (Kafka 兼容)   │
+                                 └─────────────┘  └─────┬──────────┘
+                                                        │ Consumer
+                                                 ┌──────▼──────────┐
+                                                 │   PostgreSQL    │
+                                                 │  event_logs 表  │
+                                                 └─────────────────┘
+```
+
+---
+
+## 各层详解
+
+### 1. ESP32 设备端
+
+胸牌硬件，持续采集传感器数据并通过 TCP 推送到手机。
+
+| 传感器 | 用途 |
+|--------|------|
+| IMU (ax/ay/az) | 跌倒检测 |
+| 雷达测距 | 障碍物距离（未来避障语音播报） |
+| 摄像头 | 拍摄 JPEG 图像帧用于药品识别 |
+| 按钮 A/B | 用户主动触发操作（预留） |
+
+**TCP 发送格式**（同一连接中混合两种帧）：
+
+```
+传感器 JSON（以 \n 结尾）：
+{"radar_dist":80,"ax":0.12,"ay":9.81,"az":0.05,"btn_a":0,"btn_b":0}\n
+
+图像帧（原始 JPEG 字节，SOI = 0xFF 0xD8，EOI = 0xFF 0xD9）：
+[FF D8 FF ... FF D9]
+```
+
+**Android → ESP32 命令下发**（`VisionTcpServer` 广播，以 `\n` 结尾）：
+
+| 命令 | 触发 | 设备行为 |
+|------|------|--------|
+| `BUZZER:ON\n` | 设备页蜂鸣器按钮 | 蜂鸣器鸣响 |
+| `FLASHLIGHT:TOGGLE\n` | 设备页灯光按钮 | 闪光灯切换 |
+
+---
+
+### 2. Android 手机端
+
+**包结构**：`app/src/main/java/com/example/myapplication/`
+
+#### 服务层（`VisionHubService`）
+
+前台 Service，持有 `WakeLock`，统一编排所有后台逻辑：
+
+```
+VisionHubService
+  ├─ VisionTcpServer          TCP :8080，接受 ESP32 连接
+  │    └─ VisionStreamDecoder 逐字节解析混合流，识别 JSON / JPEG 帧
+  ├─ FallDetectionEngine      基于 IMU 幅值的四状态跌倒状态机
+  │    └─ FallDetectionConfig 运行时热重载（低/中/高灵敏度）
+  ├─ EmergencyCallHandler     跌倒确认后触发 ACTION_CALL
+  └─ LocalVisionAnalyzer
+       └─ YoloInferenceManager ONNX Runtime 本地推理
+```
+
+#### 跌倒检测状态机
+
+```
+IDLE ──(幅值 < freeFallThreshold)──▶ DETECTING
+  ▲                                      │
+  │                             超时(impactWindowMs)
+  │                                      │
+  └──────────────────────────────── 回 IDLE
+                                         │
+                           幅值 ≥ impactThreshold
+                                         │
+                                         ▼
+                               FALL_CONFIRMED ──▶ 触发紧急拨号
+                                         │
+                               进入 COOLDOWN (10s)
+                                         │
+                                    ▶ 回 IDLE
+```
+
+灵敏度预设（可在 App 内切换）：
+
+| 档位 | freeFallThreshold | impactThreshold | 窗口 |
+|------|-------------------|-----------------|------|
+| 低（较难触发） | 3.0 m/s² | 22.0 m/s² | 800ms |
+| 中（默认）     | 2.5 m/s² | 18.0 m/s² | 1000ms |
+| 高（较易触发） | 2.0 m/s² | 14.0 m/s² | 1200ms |
+
+#### 状态中枢（`VisionDataHub`）
+
+全局单例 object，所有状态以 Flow 形式暴露，UI 层直接 `collectAsStateWithLifecycle`：
+
+| Flow | 类型 | 说明 |
+|------|------|------|
+| `connectionState` | `StateFlow` | STOPPED / STARTING / LISTENING / CONNECTED / ERROR |
+| `fallAlertState` | `StateFlow` | IDLE / DETECTING / FALL_CONFIRMED / EMERGENCY_CALLING |
+| `localVisionState` | `StateFlow` | IDLE / PROCESSING / FRAME_ANALYZED / ERROR |
+| `obstacleEnabled` | `StateFlow` | 避障开关（控制是否触发 YOLO 推理） |
+| `fallConfig` | `StateFlow` | 跌倒检测参数，Service 热重载 |
+| `emergencyContact` | `StateFlow` | 紧急联系人号码，持久化至 SharedPreferences |
+| `sensorPackets` | `SharedFlow` | IMU / 雷达传感器数据 |
+| `imageFrames` | `SharedFlow` | JPEG 帧字节（发布前已 `copyOf` 防并发修改） |
+| `deviceCommands` | `SharedFlow` | 下发给 ESP32 的命令字符串 |
+
+#### UI 层（Jetpack Compose）
+
+6 个页面，无 ViewModel，直接读取 VisionDataHub：
+
+| 页面 | 入口 | 主要功能 |
+|------|------|--------|
+| `HomeScreen` | 底栏「首页」 | 实时避障 / 药品识别快捷入口，连接状态 |
+| `ObstacleScreen` | 底栏「避障」 | 避障开关、音量调节、跌倒灵敏度设置 |
+| `RecognitionScreen` | 底栏「识别」 | 拍照触发 YOLO 推理，展示识别结果，TTS 朗读 |
+| `DeviceScreen` | 底栏「设备」 | ESP32 状态、蜂鸣器/灯光命令下发 |
+| `ProfileScreen` | 底栏「我的」 | 用户信息、编辑紧急联系人、设置入口 |
+| `HistoryScreen` | 「我的」浮层 | 事件历史列表，语音搜索关键词过滤 |
+
+持久化（SharedPreferences，同一文件 `visionhub_prefs`）：
+
+| 类 | 存储内容 |
+|----|--------|
+| `VolumePreference` | TTS 音量 |
+| `SensitivityPreference` | 跌倒检测灵敏度 |
+| `ContactPreference` | 紧急联系人电话 |
+
+---
+
+### 3. Go 后端
+
+**目录**：`backend/`，详细文档见 [backend/README.md](backend/README.md)。
+
+```
+POST /api/v1/event/report        跌倒事件上报 → Kafka → PostgreSQL
+POST /api/v1/recognize/medicine  药品识别 → Redis 缓存 → OCR stub → LLM stub
+GET  /healthz                    健康检查
+```
+
+技术栈：Go 1.22 · Fiber v2 · GORM · PostgreSQL 16 · Redis 7 · Redpanda（Kafka 兼容）
+
+---
+
+### 4. AI 模型管线
+
+#### 本地推理（已实现）
+
+```
+JPEG 帧
+  │
+  ▼  YoloInferenceManager（ONNX Runtime）
+  │  1. BitmapFactory 解码 JPEG
+  │  2. 缩放到 640×640
+  │  3. RGB → CHW Float32 Tensor（÷255 归一化）
+  │  4. OrtSession.run()
+  │  5. 后处理：置信度过滤（≥0.35）、类别映射
+  │
+  ├─ Medicine_Box 检测 → 药盒位置
+  └─ Text_Region 检测 → 裁出最高置信度文字区域 → LocalVisionState.summary
+```
+
+模型文件：`app/src/main/assets/yolo11n.onnx`（同时镜像在 `yolo/onnx/yolo11n.onnx`）
+
+#### 云端管线（OCR + LLM，待接入）
+
+```
+Text_Region 裁图（JPEG bytes）
+  │
+  ▼  POST /api/v1/recognize/medicine
+  │
+  ├─ simulateOCR()   ← 当前为 stub，需替换为阿里云/腾讯云 OCR API
+  │    └─ 返回文字字符串
+  │
+  ├─ Redis GET（MD5 缓存键）
+  │    └─ 命中 → 直接返回，节省 LLM 调用
+  │
+  └─ simulateLLM()   ← 当前为 stub，需替换为 Qwen/Claude/GPT-4o
+       └─ 返回用药建议 tts_text → Android TTS 朗读
+```
+
+#### MobileNetV3 特征匹配（规划中）
+
+`yolo/onnx/mobilenet_v3_feat.onnx` + `yolo/special_items.json` 是预留的商品识别管线：
+- YOLO 检出 Medicine_Box 区域后裁图
+- MobileNetV3 提取 embedding
+- 与 `special_items.json` 中的商品特征向量做余弦相似度匹配
+- 识别具体商品（如「相印餐巾纸正面」）
+
+目前**尚未接入**应用运行时，仅留有模型文件和特征数据库。
+
+---
+
+## 数据流
+
+### 跌倒事件完整链路
+
+```
+ESP32 IMU 采样（~50Hz）
+  └─▶ TCP JSON 帧 → VisionStreamDecoder → SensorPacket
+        └─▶ VisionDataHub.sensorPackets（SharedFlow）
+              └─▶ VisionHubService.observeSensorPackets()
+                    └─▶ FallDetectionEngine.process()
+                          ├─ IDLE / DETECTING → 更新 FallAlertState UI
+                          └─ FALL_CONFIRMED
+                                ├─▶ EmergencyCallHandler.triggerEmergencyCall()
+                                │    └─ 拨打 VisionDataHub.emergencyContact 号码
+                                └─▶ [待接入] POST /api/v1/event/report
+                                              └─▶ Kafka → Consumer → PostgreSQL
+```
+
+### 药品识别完整链路
+
+```
+用户点击「拍照识别」
+  └─▶ ActivityResultContracts.TakePicture()
+        └─▶ FileProvider URI → Dispatchers.IO 读取 JPEG bytes
+              └─▶ VisionDataHub.publishImageFrame()
+                    └─▶ VisionHubService.observeImageFrames()
+                          └─▶ [gated: obstacleEnabled]
+                                └─▶ YoloInferenceManager.analyze()
+                                      ├─ ONNX 推理 → Medicine_Box / Text_Region
+                                      └─▶ LocalVisionState（summary 字符串）
+                                            ├─▶ RecognitionScreen 展示
+                                            ├─▶ TTS 朗读
+                                            └─▶ [待接入] POST /recognize/medicine
+                                                          └─▶ OCR → LLM → tts_text
+```
+
+---
+
+## 分支与目录结构
+
+```
+main              基线分支
+android           Android 应用开发分支（当前）
+backend           Go 后端开发分支
+
+仓库目录：
+├── app/                       Android 应用源码
+│   └── src/main/java/com/example/myapplication/
+│       ├── MainActivity.kt        Activity 入口 + 全局 UI 编排
+│       ├── VisionHubService.kt    前台服务
+│       ├── VisionDataHub.kt       全局 Flow 状态中枢
+│       ├── VisionTcpServer.kt     TCP 服务器
+│       ├── VisionStreamDecoder.kt 混合流解析器
+│       ├── FallDetectionEngine.kt 跌倒检测状态机
+│       ├── YoloInferenceManager.kt ONNX 推理
+│       ├── EmergencyCallHandler.kt 紧急拨号
+│       ├── navigation/            页面导航枚举
+│       ├── ui/
+│       │   ├── screens/           6 个页面 Composable
+│       │   ├── components/        可复用 UI 组件
+│       │   ├── AppColors.kt
+│       │   └── AppModels.kt
+│       └── util/                  纯函数辅助 + SharedPreferences
+├── backend/                   Go 后端（见 backend/README.md）
+├── yolo/
+│   ├── onnx/yolo11n.onnx          检测模型（源文件）
+│   ├── onnx/mobilenet_v3_feat.onnx 特征提取模型（规划中）
+│   └── special_items.json         商品特征向量库
+├── ARCHITECTURE.md            系统架构详细文档
+├── DEPLOYMENT.md              构建与部署指南
+└── README.md                  本文件
+```
+
+---
+
+## 快速开始
+
+### 后端（Docker 一键启动）
+
+```bash
+# 需要 Docker Desktop 运行中
+bash backend/deploy.sh
+```
+
+健康检查：`curl http://localhost:3000/healthz` → `{"status":"ok"}`
+
+详见 [backend/README.md](backend/README.md)。
+
+### Android APK 构建
 
 ```bash
 export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
+
+./gradlew assembleDebug          # 构建 debug APK
+./gradlew installDebug           # 安装到已连接设备
+./gradlew testDebugUnitTest      # 运行单元测试
 ```
 
-## 构建与测试
-
-在项目根目录执行：
-
-```bash
-./gradlew assembleDebug
-./gradlew testDebugUnitTest
-./gradlew lintDebug
-```
-
-运行单个单元测试：
-
-```bash
-./gradlew testDebugUnitTest --tests "com.example.myapplication.LocalVisionAnalyzerTest"
-```
-
-安装到已连接设备或模拟器：
-
-```bash
-./gradlew installDebug
-```
-
-## 运行方式
-
-### Android Studio
-
-1. 用 Android Studio 打开本项目
-2. 确认 Gradle 使用的是 JDK 17
-3. 连接真机或启动模拟器
-4. 运行 `app` 配置
-
-### 启动时会发生什么
-
-- `MainActivity` 会在需要时请求通知权限
-- 应用启动 `VisionHubService`
-- 服务进入前台模式并启动 TCP 服务器
-- TCP 服务器开始监听 `8080` 端口
-
-## API 文档
-
-当前项目对外暴露的是**设备侧 TCP 接入 API**，不是 HTTP REST API。外部发送端连接 Android 设备的 `8080` 端口后，可以连续发送传感器 JSON 帧和 JPEG 图像帧给应用处理。
-
-### API 概览
-
-| 项目 | 值 |
-| --- | --- |
-| 协议 | TCP |
-| 默认端口 | `8080` |
-| 数据方向 | Client → Device |
-| 应用响应 | 无应用层响应体 |
-| 支持帧类型 | 换行分隔的 JSON 传感器帧、JPEG 二进制帧 |
-| 帧顺序 | 按接收顺序处理 |
-| 连接方式 | 同一条 TCP 连接中可混合发送传感器帧和图像帧 |
-
-### TCP 端点
-
-应用在 `app/src/main/java/com/example/myapplication/VisionTcpServer.kt` 中启动本地 TCP 服务。
-
-- 端口：`8080`
-- 主机：Android 设备当前可被发送端访问到的 IP 地址
-- 传输层：纯 TCP
-- 鉴权：无
-- 加密：无
-
-### 数据流格式
-
-一条 TCP 连接中可以混合包含以下两类数据：
-
-1. **传感器 JSON 帧**，以换行符 `\n` 分隔
-2. **JPEG 图像帧**，通过 JPEG 起止标记识别：`0xFF 0xD8 ... 0xFF 0xD9`
-
-解码逻辑位于：
-`app/src/main/java/com/example/myapplication/VisionStreamDecoder.kt`
-
-#### 传感器帧格式
-
-每个传感器帧必须是一个完整 JSON 对象，并以换行结束。
-
-示例：
-
-```json
-{"radar_dist":120,"imu":{"ax":0.1,"ay":0.5,"az":9.8},"btn_a":0,"btn_b":1}
-```
-
-支持字段如下：
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `radar_dist` | integer | 是 | 雷达距离读数 |
-| `imu.ax` | number | 是 | IMU X 轴加速度 |
-| `imu.ay` | number | 是 | IMU Y 轴加速度 |
-| `imu.az` | number | 是 | IMU Z 轴加速度 |
-| `btn_a` | integer | 是 | 按键 A 状态 |
-| `btn_b` | integer | 是 | 按键 B 状态 |
-
-说明：
-
-- 数值字段支持整数或小数（按当前解析逻辑）
-- 当前解析器要求所有字段都存在
-- 缺字段或格式不合法的 JSON 不属于当前支持范围
-
-#### JPEG 帧格式
-
-JPEG 图像帧必须以以下字节开头：
-
-```text
-FF D8
-```
-
-并以以下字节结束：
-
-```text
-FF D9
-```
-
-说明：
-
-- JPEG 帧**不要求**末尾带换行
-- JPEG 和 JSON 可以在同一条 TCP 连接内交错发送
-- 当前本地视觉分析器只做轻量级校验/分析，还没有 OCR 或模型推理
-
-### 混合流示例
-
-合法的数据流顺序示例：
-
-1. 传感器 JSON + 换行
-2. 传感器 JSON + 换行
-3. JPEG 二进制帧
-4. 传感器 JSON + 换行
-
-应用会严格按照到达顺序处理。
-
-### 应用侧处理约定
-
-收到的数据会通过 `VisionDataHub` 中的 Flow 向应用其它部分分发。
-
-#### 连接状态
-
-由 `VisionTcpServer` 发布到 `VisionDataHub.connectionState`。
-
-| 状态 | 含义 |
-| --- | --- |
-| `STOPPED` | TCP 服务未运行 |
-| `STARTING` | 服务已创建，但服务器尚未监听 |
-| `LISTENING` | 正在监听客户端连接 |
-| `CONNECTED` | 至少已有一个客户端连接成功 |
-| `ERROR` | TCP 服务出现异常 |
-
-#### 跌倒检测流水线
-
-传感器数据由 `app/src/main/java/com/example/myapplication/FallDetectionEngine.kt` 处理。
-
-当前默认阈值来自 `FallDetectionConfig.DEFAULT`：
-
-| 配置项 | 值 |
-| --- | --- |
-| `freeFallThreshold` | `2.5` |
-| `impactThreshold` | `18.0` |
-| `impactWindowMillis` | `1000` |
-| `cooldownMillis` | `10000` |
-
-高层逻辑如下：
-
-1. 若加速度模长低于 `freeFallThreshold`，状态进入 `DETECTING`
-2. 若在 `impactWindowMillis` 内检测到强冲击，则判定跌倒成立
-3. 应用尝试拨打配置好的紧急号码
-4. 引擎进入 `cooldownMillis` 冷却期
-
-应用层展示的跌倒状态如下：
-
-| 状态 | 含义 |
-| --- | --- |
-| `IDLE` | 正常监测中 |
-| `DETECTING` | 检测到疑似跌倒 |
-| `FALL_CONFIRMED` | 已确认跌倒 |
-| `EMERGENCY_CALLING` | 正在尝试紧急呼叫 |
-
-#### 紧急呼叫行为
-
-配置文件位于：
-`app/src/main/java/com/example/myapplication/EmergencyContactConfig.kt`
-
-| 项目 | 当前值 |
-| --- | --- |
-| 紧急号码 | `112` |
-| 触发方式 | `Intent.ACTION_CALL` |
-| 所需权限 | `CALL_PHONE` |
-
-如果设备未授予 `CALL_PHONE` 权限，或者系统中没有可处理拨号的 Activity，则不会发起呼叫。
-
-#### 本地视觉流水线
-
-JPEG 图像帧会被 `app/src/main/java/com/example/myapplication/LocalVisionAnalyzer.kt` 消费，并发布到 `VisionDataHub.localVisionState`。
-
-当前本地视觉状态包括：
-
-| 状态 | 含义 |
-| --- | --- |
-| `IDLE` | 等待图像帧 |
-| `PROCESSING` | 正在分析最新图像 |
-| `FRAME_ANALYZED` | 图像通过当前轻量分析器 |
-| `ERROR` | 图像无效或分析失败 |
-
-当前分析器行为：
-
-- 校验输入是否像 JPEG 帧
-- 生成一条最近图像的摘要信息
-- 暂不执行 OCR、目标检测或云端上传
-
-### 发送端示例
-
-#### 使用 `nc` 发送单条传感器帧
-
-```bash
-printf '%s\n' '{"radar_dist":120,"imu":{"ax":0.1,"ay":0.5,"az":9.8},"btn_a":0,"btn_b":1}' | nc <device-ip> 8080
-```
-
-#### 使用 `nc` 发送 JPEG 文件
-
-```bash
-cat frame.jpg | nc <device-ip> 8080
-```
-
-#### 使用 Python 发送混合帧
-
-```python
-import socket
-
-sensor = b'{"radar_dist":120,"imu":{"ax":0.1,"ay":0.5,"az":9.8},"btn_a":0,"btn_b":1}\n'
-image = open("frame.jpg", "rb").read()
-
-with socket.create_connection(("<device-ip>", 8080)) as sock:
-    sock.sendall(sensor)
-    sock.sendall(image)
-    sock.sendall(sensor)
-```
-
-### 运行说明与限制
-
-- 当前服务端不会向客户端返回确认响应
-- 当前协议面向受信任的本地网络 / 设备调试环境
-- 目前没有重试、鉴权、校验和或统一消息封装
-- 错误格式的数据可能导致当前连接的数据处理终止
-- UI 只负责展示状态；真正的数据接收和处理都发生在前台服务中
-
-## 权限说明
-
-在 `app/src/main/AndroidManifest.xml` 中声明的权限如下：
-
-- `INTERNET`
-- `ACCESS_NETWORK_STATE`
-- `WAKE_LOCK`
-- `FOREGROUND_SERVICE`
-- `FOREGROUND_SERVICE_DATA_SYNC`
-- `POST_NOTIFICATIONS`
-- `CALL_PHONE`
-
-## 当前限制
-
-- 本地视觉仍是轻量级占位实现，还没有真正接入 OCR / TFLite 推理
-- 紧急联系人号码目前写在代码里，还不能在 App 内动态配置
-- UI 目前刻意保持为单 Activity / 单页面的简化结构
-- 还没有接入云端 OCR / LLM 流程
-
-## 备注
-
-- 当前 SDK 配置较新：`minSdk 35`、`targetSdk 36`、`compileSdk 36`
-- TCP 默认端口：`8080`
-- GitHub 仓库：`jry21223/vision-hub`
+首次运行时 App 会请求权限：
+
+| 权限 | 用途 |
+|------|------|
+| `POST_NOTIFICATIONS` | 前台服务通知 |
+| `CALL_PHONE` | 跌倒后紧急拨号 |
+| `CAMERA` | 拍照触发药品识别 |
+| `RECORD_AUDIO` | 语音搜索历史记录 |
+
+---
+
+## 当前状态
+
+### 已实现
+
+- ESP32 TCP 接入：混合流解析（JSON 传感器帧 + JPEG 图像帧）
+- TCP 命令下发：蜂鸣器 (`BUZZER:ON`) / 闪光灯 (`FLASHLIGHT:TOGGLE`)
+- 跌倒检测状态机（4 状态，3 档灵敏度，运行时热切换）
+- 自动紧急拨号（联系人号码 App 内可编辑 + 持久化）
+- 本地 YOLO 药品目标检测（`Medicine_Box` / `Text_Region`）
+- Compose 全功能 UI（6 页面 + TTS 朗读 + 语音搜索）
+- Go 后端：事件上报 / 药品识别接口 + Kafka 异步持久化 + Redis 缓存
+
+### 待接入
+
+| 功能 | 说明 |
+|------|------|
+| 云端 OCR | 替换 `simulateOCR()` stub，接入阿里云/腾讯云 OCR |
+| 云端 LLM | 替换 `simulateLLM()` stub，接入 Qwen/Claude/GPT-4o |
+| Android → 后端 HTTP | 跌倒确认后 POST `/event/report`；识别后 POST `/recognize/medicine` |
+| ESP32 命令解析 | 固件侧实现 `BUZZER:ON` / `FLASHLIGHT:TOGGLE` 响应 |
+| MobileNetV3 商品匹配 | 接入 `mobilenet_v3_feat.onnx` + `special_items.json` 管线 |
+| 设备注册 | `Device` 表对接，替换 `deviceIDFromString` 中的占位 `return 0` |
+| TCP 鉴权 | 应用层握手，防止未授权设备接入 |

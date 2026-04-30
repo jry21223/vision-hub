@@ -7,19 +7,27 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class VisionHubService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var wakeLock: PowerManager.WakeLock? = null
-    private val fallDetectionEngine = FallDetectionEngine()
-    private val emergencyCallHandler = EmergencyCallHandler()
+
+    @Volatile
+    private var lastImageFrameAtMillis = 0L
+
+    @Volatile
+    private var fallDetectionEngine = FallDetectionEngine()
     private val localVisionAnalyzer = LocalVisionAnalyzer()
+    private val latencyMonitor = DeviceLatencyMonitor(scope = serviceScope)
     private val tcpServer = VisionTcpServer(
         scope = serviceScope,
         decoder = VisionStreamDecoder(),
@@ -29,6 +37,7 @@ class VisionHubService : Service() {
     override fun onCreate() {
         super.onCreate()
         NotificationHelper.createChannel(this)
+        NotificationHelper.createAlertChannel(this)
         VisionDataHub.updateConnectionState(ConnectionState.STARTING)
         VisionDataHub.updateFallAlertState(FallAlertState.IDLE)
         VisionDataHub.updateLocalVisionState(LocalVisionState.IDLE)
@@ -40,8 +49,11 @@ class VisionHubService : Service() {
                 acquire()
             }
         }
+        observeFallConfig()
         observeSensorPackets()
         observeImageFrames()
+        observeRecognitionState()
+        latencyMonitor.start()
         tcpServer.start()
     }
 
@@ -63,6 +75,7 @@ class VisionHubService : Service() {
 
     override fun onDestroy() {
         tcpServer.stop()
+        latencyMonitor.stop()
         serviceScope.cancel()
         wakeLock?.let { currentWakeLock ->
             if (currentWakeLock.isHeld) {
@@ -76,6 +89,14 @@ class VisionHubService : Service() {
 
     override fun onBind(intent: Intent): IBinder? = null
 
+    private fun observeFallConfig() {
+        serviceScope.launch {
+            VisionDataHub.fallConfig.collect { newConfig ->
+                fallDetectionEngine = FallDetectionEngine(config = newConfig)
+            }
+        }
+    }
+
     private fun observeSensorPackets() {
         serviceScope.launch {
             VisionDataHub.sensorPackets.collect { packet ->
@@ -88,7 +109,8 @@ class VisionHubService : Service() {
                 }
                 VisionDataHub.updateFallAlertState(fallAlertState)
                 if (outcome.shouldTriggerEmergency) {
-                    val didStartCall = emergencyCallHandler.triggerEmergencyCall(this@VisionHubService)
+                    val handler = EmergencyCallHandler(config = VisionDataHub.emergencyContact.value)
+                    val didStartCall = handler.triggerEmergencyCall(this@VisionHubService)
                     val nextState = if (didStartCall) {
                         FallAlertState.EMERGENCY_CALLING
                     } else {
@@ -103,10 +125,63 @@ class VisionHubService : Service() {
     private fun observeImageFrames() {
         serviceScope.launch {
             VisionDataHub.imageFrames.collect { frame ->
+                if (!VisionDataHub.obstacleEnabled.value) return@collect
+                lastImageFrameAtMillis = SystemClock.elapsedRealtime()
                 VisionDataHub.updateLocalVisionState(LocalVisionState.PROCESSING)
-                val result = localVisionAnalyzer.analyze(frame)
+                val result = localVisionAnalyzer.analyze(this@VisionHubService, frame)
                 VisionDataHub.updateLocalVisionState(result)
             }
+        }
+    }
+
+    private fun observeRecognitionState() {
+        serviceScope.launch {
+            VisionDataHub.connectionState.collectLatest { state ->
+                if (state != ConnectionState.CONNECTED) {
+                    lastImageFrameAtMillis = 0L
+                    VisionDataHub.updateLocalVisionState(LocalVisionState.waitingForNewFrame())
+                }
+            }
+        }
+
+        serviceScope.launch {
+            VisionDataHub.obstacleEnabled.collectLatest { enabled ->
+                if (!enabled) {
+                    lastImageFrameAtMillis = 0L
+                    VisionDataHub.updateLocalVisionState(LocalVisionState.waitingForNewFrame())
+                    return@collectLatest
+                }
+
+                while (isActive && VisionDataHub.obstacleEnabled.value) {
+                    delay(NO_NEW_FRAME_TIMEOUT_MILLIS)
+                    if (VisionDataHub.connectionState.value != ConnectionState.CONNECTED) {
+                        lastImageFrameAtMillis = 0L
+                        VisionDataHub.updateLocalVisionState(LocalVisionState.waitingForNewFrame())
+                        continue
+                    }
+                    val lastFrameAtMillis = lastImageFrameAtMillis
+                    if (lastFrameAtMillis == 0L) {
+                        VisionDataHub.updateLocalVisionState(LocalVisionState.waitingForNewFrame())
+                        continue
+                    }
+                    val frameAgeMillis = SystemClock.elapsedRealtime() - lastFrameAtMillis
+                    if (frameAgeMillis < NO_NEW_FRAME_TIMEOUT_MILLIS) {
+                        continue
+                    }
+                    val currentState = VisionDataHub.localVisionState.value
+                    if (!shouldSwitchToWaitingForNewFrame(currentState)) {
+                        continue
+                    }
+                    VisionDataHub.updateLocalVisionState(currentState.waitingForNextFrame())
+                }
+            }
+        }
+    }
+
+    private fun shouldSwitchToWaitingForNewFrame(state: LocalVisionState): Boolean {
+        return when (state.issue) {
+            LocalVisionIssue.MODEL_PIPELINE -> false
+            else -> state.status != LocalVisionStatus.PROCESSING
         }
     }
 
@@ -114,5 +189,6 @@ class VisionHubService : Service() {
         private const val WAKE_LOCK_TAG = "com.example.myapplication:VisionHubWakeLock"
         private const val FOREGROUND_SERVICE_TYPES =
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        private const val NO_NEW_FRAME_TIMEOUT_MILLIS = 3_000L
     }
 }

@@ -5,9 +5,13 @@ import java.io.IOException
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class VisionTcpServer(
@@ -21,36 +25,34 @@ class VisionTcpServer(
     private val clientSockets = ConcurrentHashMap.newKeySet<Socket>()
 
     fun start() {
-        if (acceptJob != null) {
+        if (acceptJob?.isActive == true) {
             return
         }
 
         acceptJob = scope.launch {
-            runCatching {
-                ServerSocket(port).also { socket ->
-                    serverSocket = socket
-                    dataHub.updateConnectionState(ConnectionState.LISTENING)
-                    while (!socket.isClosed) {
-                        val client = socket.accept().apply {
-                            soTimeout = CLIENT_SOCKET_TIMEOUT_MILLIS
+            var retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
+            try {
+                while (isActive) {
+                    try {
+                        retryDelayMillis = runAcceptLoop()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: SocketException) {
+                        if (!isActive) {
+                            break
                         }
-                        clientSockets += client
-                        dataHub.updateConnectionState(ConnectionState.CONNECTED)
-                        launch {
-                            client.use { connectedClient ->
-                                readClient(connectedClient)
-                            }
-                            clientSockets -= client
-                            if (!socket.isClosed) {
-                                dataHub.updateConnectionState(ConnectionState.LISTENING)
-                            }
+                        retryDelayMillis = handleAcceptFailure(retryDelayMillis)
+                    } catch (error: IOException) {
+                        if (!isActive) {
+                            break
                         }
+                        retryDelayMillis = handleAcceptFailure(retryDelayMillis)
                     }
                 }
-            }.onFailure {
-                if (it !is SocketException) {
-                    dataHub.updateConnectionState(ConnectionState.ERROR)
-                }
+            } finally {
+                serverSocket?.closeQuietly()
+                serverSocket = null
+                acceptJob = null
             }
         }
     }
@@ -62,6 +64,7 @@ class VisionTcpServer(
         clientSockets.clear()
         serverSocket?.closeQuietly()
         serverSocket = null
+        dataHub.clearConnectionRuntimeInfo()
         dataHub.updateConnectionState(ConnectionState.STOPPED)
     }
 
@@ -73,6 +76,59 @@ class VisionTcpServer(
                 onImageFrame = dataHub::publishImageFrame,
             )
         }
+    }
+
+    private fun runAcceptLoop(): Long {
+        ServerSocket(port).also { socket ->
+            serverSocket = socket
+            dataHub.updateConnectionState(ConnectionState.LISTENING)
+            while (!socket.isClosed) {
+                val client = socket.accept().apply {
+                    soTimeout = CLIENT_SOCKET_TIMEOUT_MILLIS
+                }
+                clientSockets += client
+                updateConnectionForActiveClients()
+                scope.launch {
+                    try {
+                        client.use { connectedClient ->
+                            readClient(connectedClient)
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: SocketTimeoutException) {
+                    } catch (_: IOException) {
+                    } finally {
+                        clientSockets -= client
+                        client.closeQuietly()
+                        updateConnectionForActiveClients()
+                    }
+                }
+            }
+        }
+        return INITIAL_RETRY_DELAY_MILLIS
+    }
+
+    private suspend fun handleAcceptFailure(retryDelayMillis: Long): Long {
+        serverSocket?.closeQuietly()
+        serverSocket = null
+        dataHub.clearConnectionRuntimeInfo()
+        dataHub.updateConnectionState(ConnectionState.ERROR)
+        delay(retryDelayMillis)
+        return (retryDelayMillis * 2).coerceAtMost(MAX_RETRY_DELAY_MILLIS)
+    }
+
+    private fun updateConnectionForActiveClients() {
+        val remainingClient = clientSockets.firstOrNull()
+        if (remainingClient == null) {
+            dataHub.clearConnectionRuntimeInfo()
+            serverSocket?.takeIf { !it.isClosed }?.let {
+                dataHub.updateConnectionState(ConnectionState.LISTENING)
+            }
+            return
+        }
+
+        dataHub.updateRemoteDeviceIp(remainingClient.inetAddress?.hostAddress)
+        dataHub.updateConnectionState(ConnectionState.CONNECTED)
     }
 
     private fun ServerSocket.closeQuietly() {
@@ -92,5 +148,7 @@ class VisionTcpServer(
     companion object {
         const val DEFAULT_PORT = 8080
         private const val CLIENT_SOCKET_TIMEOUT_MILLIS = 10_000
+        private const val INITIAL_RETRY_DELAY_MILLIS = 1_000L
+        private const val MAX_RETRY_DELAY_MILLIS = 10_000L
     }
 }
