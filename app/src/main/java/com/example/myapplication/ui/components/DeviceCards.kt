@@ -1,5 +1,6 @@
 package com.example.myapplication.ui.components
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,11 +17,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.BluetoothSearching
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FlashlightOn
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -35,16 +40,24 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.myapplication.ConnectionState
 import com.example.myapplication.FallAlertState
+import com.example.myapplication.VisionDataHub
+import com.example.myapplication.api.OnlineDevice
+import com.example.myapplication.api.BindDeviceRequest
+import com.example.myapplication.api.UnbindDeviceRequest
+import com.example.myapplication.api.RetrofitClient
 import com.example.myapplication.ui.CardBackground
 import com.example.myapplication.ui.PrimaryText
 import com.example.myapplication.ui.SecondaryText
@@ -60,6 +73,7 @@ import com.example.myapplication.util.guardianLocationUpdateText
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -132,7 +146,11 @@ internal fun DeviceCoreCard(
 }
 
 @Composable
-internal fun GuardianLocationCard(connectionState: ConnectionState) {
+internal fun GuardianLocationCard(
+    connectionState: ConnectionState,
+    latitude: Double? = null,
+    longitude: Double? = null,
+) {
     Card(
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = WarmYellow),
@@ -154,7 +172,7 @@ internal fun GuardianLocationCard(connectionState: ConnectionState) {
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = "监护人定位",
+                    text = "设备定位",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     color = PrimaryText,
@@ -166,18 +184,33 @@ internal fun GuardianLocationCard(connectionState: ConnectionState) {
                 colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.55f)),
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = guardianLocationText(connectionState),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Black,
-                        color = PrimaryText,
-                    )
-                    Text(
-                        text = guardianLocationUpdateText(connectionState),
-                        modifier = Modifier.padding(top = 6.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = PrimaryText.copy(alpha = 0.72f),
-                    )
+                    if (latitude != null && longitude != null) {
+                        Text(
+                            text = "纬度 ${"%.4f".format(latitude)}  经度 ${"%.4f".format(longitude)}",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            color = PrimaryText,
+                        )
+                        Text(
+                            text = "已接收到设备 GPS 坐标",
+                            modifier = Modifier.padding(top = 6.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = PrimaryText.copy(alpha = 0.72f),
+                        )
+                    } else {
+                        Text(
+                            text = guardianLocationText(connectionState),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            color = PrimaryText,
+                        )
+                        Text(
+                            text = guardianLocationUpdateText(connectionState),
+                            modifier = Modifier.padding(top = 6.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = PrimaryText.copy(alpha = 0.72f),
+                        )
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(14.dp))
@@ -447,6 +480,176 @@ private fun ConfigItem(
                 )
             }
             trailingContent?.invoke()
+        }
+    }
+}
+
+@Composable
+internal fun DeviceBindingCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val boundDevice by VisionDataHub.boundDevice.collectAsStateWithLifecycle()
+    val userProfile by VisionDataHub.userProfile.collectAsStateWithLifecycle()
+
+    var onlineDevices by remember { mutableStateOf<List<OnlineDevice>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+    var showDialog by remember { mutableStateOf(false) }
+    var searchError by remember { mutableStateOf<String?>(null) }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("在线设备") },
+            text = {
+                if (isSearching) {
+                    Text("正在搜索…")
+                } else if (onlineDevices.isEmpty()) {
+                    Text(searchError ?: "未找到在线设备")
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        onlineDevices.forEach { device ->
+                            val isBound = boundDevice?.deviceId == device.deviceId
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isBound) SuccessGreen else SurfaceSoft,
+                                ),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = device.deviceName,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = PrimaryText,
+                                        )
+                                        Text(
+                                            text = device.ipAddress,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = SecondaryText,
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            scope.launch {
+                                                try {
+                                                    if (isBound) {
+                                                        RetrofitClient.deviceApi.unbindDevice(
+                                                            userId = userProfile.userId,
+                                                            req = UnbindDeviceRequest(device.deviceId),
+                                                        )
+                                                        VisionDataHub.updateBoundDevice(null)
+                                                    } else {
+                                                        RetrofitClient.deviceApi.bindDevice(
+                                                            userId = userProfile.userId,
+                                                            req = BindDeviceRequest(device.deviceId),
+                                                        )
+                                                        VisionDataHub.updateBoundDevice(device)
+                                                    }
+                                                    showDialog = false
+                                                } catch (e: Exception) {
+                                                    withContext(Dispatchers.Main) {
+                                                        Toast.makeText(context, "操作失败，请稍后重试", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isBound) Icons.Filled.LinkOff else Icons.Filled.Link,
+                                            contentDescription = if (isBound) "解绑" else "绑定",
+                                            tint = if (isBound) PrimaryText else WarmYellowDark,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDialog = false }) { Text("关闭") }
+            },
+        )
+    }
+
+    Card(
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = CardBackground),
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text(
+                        text = "设备绑定",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Black,
+                        color = WarmYellowDark,
+                    )
+                    Text(
+                        text = if (boundDevice != null) boundDevice!!.deviceName else "未绑定设备",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Black,
+                        color = PrimaryText,
+                    )
+                    if (boundDevice != null) {
+                        Text(
+                            text = "ID: ${boundDevice!!.deviceId}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SecondaryText,
+                        )
+                    }
+                }
+                Surface(
+                    color = if (boundDevice != null) SuccessGreen else SurfaceSoft,
+                    shape = RoundedCornerShape(999.dp),
+                ) {
+                    Text(
+                        text = if (boundDevice != null) "已绑定" else "未绑定",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Black,
+                        color = if (boundDevice != null) SuccessText else SecondaryText,
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Button(
+                onClick = {
+                    showDialog = true
+                    isSearching = true
+                    searchError = null
+                    onlineDevices = emptyList()
+                    scope.launch {
+                        try {
+                            val response = withContext(Dispatchers.IO) {
+                                RetrofitClient.deviceApi.listOnlineDevices()
+                            }
+                            onlineDevices = response.body()?.devices ?: emptyList()
+                            if (onlineDevices.isEmpty()) searchError = "未找到在线设备"
+                        } catch (e: Exception) {
+                            searchError = "搜索失败：${e.message}"
+                        } finally {
+                            isSearching = false
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Filled.BluetoothSearching, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("搜索并绑定设备")
+            }
         }
     }
 }

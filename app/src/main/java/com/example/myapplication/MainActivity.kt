@@ -84,14 +84,26 @@ import android.util.Log
 import com.example.myapplication.util.ContactPreference
 import com.example.myapplication.util.UserPreference
 import com.example.myapplication.util.AiServicePreference
+import com.example.myapplication.util.AuthPreference
+import com.example.myapplication.util.ElderlyPreference
+import com.example.myapplication.api.AlertRecord
 import com.example.myapplication.api.RetrofitClient
+import com.example.myapplication.auth.AuthTokenHolder
+import com.example.myapplication.ui.screens.ForgotPasswordScreen
+import com.example.myapplication.ui.screens.LoginScreen
+import com.example.myapplication.ui.screens.RegisterScreen
+import com.example.myapplication.ui.screens.ElderlyProfileScreen
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+
+private enum class AuthScreen { LOGIN, REGISTER, FORGOT }
 
 class MainActivity : ComponentActivity() {
     private val requestNotificationPermission =
@@ -104,18 +116,65 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermissionIfNeeded()
         setContent {
             MyApplicationTheme {
+                val context = LocalContext.current
+                val isLoggedIn by VisionDataHub.isLoggedIn.collectAsStateWithLifecycle()
+                var authScreen by rememberSaveable { mutableStateOf(AuthScreen.LOGIN) }
+                val authScope = rememberCoroutineScope()
+
+                LaunchedEffect(Unit) {
+                    val storedToken = withContext(Dispatchers.IO) { AuthPreference.loadJwt(context) }
+                    if (storedToken != null) {
+                        AuthTokenHolder.token = storedToken
+                        VisionDataHub.setLoggedIn(true)
+                    }
+                }
+
                 val fallAlertState by VisionDataHub.fallAlertState.collectAsStateWithLifecycle()
                 val connectionState by VisionDataHub.connectionState.collectAsStateWithLifecycle()
                 val localVisionState by VisionDataHub.localVisionState.collectAsStateWithLifecycle()
                 val obstacleEnabled by VisionDataHub.obstacleEnabled.collectAsStateWithLifecycle()
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    VisionHubScreen(
-                        fallAlertState = fallAlertState,
-                        connectionState = connectionState,
-                        localVisionState = localVisionState,
-                        obstacleEnabled = obstacleEnabled,
-                        modifier = Modifier.padding(innerPadding),
-                    )
+
+                if (!isLoggedIn) {
+                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                        when (authScreen) {
+                            AuthScreen.LOGIN -> LoginScreen(
+                                onLoginSuccess = { token, userId, displayName ->
+                                    AuthTokenHolder.token = token
+                                    AuthTokenHolder.userId = userId
+                                    authScope.launch { withContext(Dispatchers.IO) { AuthPreference.saveJwt(context, token) } }
+                                    VisionDataHub.setLoggedIn(true)
+                                },
+                                onNavigateToRegister = { authScreen = AuthScreen.REGISTER },
+                                onNavigateToReset = { authScreen = AuthScreen.FORGOT },
+                                modifier = Modifier.padding(innerPadding),
+                            )
+                            AuthScreen.REGISTER -> RegisterScreen(
+                                onRegisterSuccess = { token, userId, displayName ->
+                                    AuthTokenHolder.token = token
+                                    AuthTokenHolder.userId = userId
+                                    authScope.launch { withContext(Dispatchers.IO) { AuthPreference.saveJwt(context, token) } }
+                                    VisionDataHub.setLoggedIn(true)
+                                },
+                                onNavigateToLogin = { authScreen = AuthScreen.LOGIN },
+                                modifier = Modifier.padding(innerPadding),
+                            )
+                            AuthScreen.FORGOT -> ForgotPasswordScreen(
+                                onResetSuccess = { authScreen = AuthScreen.LOGIN },
+                                onNavigateToLogin = { authScreen = AuthScreen.LOGIN },
+                                modifier = Modifier.padding(innerPadding),
+                            )
+                        }
+                    }
+                } else {
+                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                        VisionHubScreen(
+                            fallAlertState = fallAlertState,
+                            connectionState = connectionState,
+                            localVisionState = localVisionState,
+                            obstacleEnabled = obstacleEnabled,
+                            modifier = Modifier.padding(innerPadding),
+                        )
+                    }
                 }
             }
         }
@@ -179,6 +238,24 @@ internal fun VisionHubScreen(
             AiServicePreference.load(context)
         }
         VisionDataHub.updateAiServiceConfig(aiConfig)
+
+        // 加载老人档案（本地缓存）
+        val elderlyProfile = withContext(Dispatchers.IO) { ElderlyPreference.load(context) }
+        VisionDataHub.updateElderlyProfile(elderlyProfile)
+
+        // 从云端加载告警历史
+        coroutineScope.launch {
+            try {
+                val alertsResponse = withContext(Dispatchers.IO) {
+                    RetrofitClient.alertApi.getAlerts(userId = profile.userId)
+                }
+                if (alertsResponse.isSuccessful && alertsResponse.body()?.success == true) {
+                    VisionDataHub.updateCloudAlerts(alertsResponse.body()!!.data ?: emptyList())
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {}
+        }
 
         // 尝试从后端同步用户档案（仅在需要时）
         coroutineScope.launch {
@@ -275,8 +352,10 @@ internal fun VisionHubScreen(
         }
     }
 
-    val historyRecords = remember(fallAlertState, connectionState, localVisionState) {
-        listOf(
+    val cloudAlerts by VisionDataHub.cloudAlerts.collectAsStateWithLifecycle()
+    val historyRecords = remember(fallAlertState, connectionState, localVisionState, cloudAlerts) {
+        val cloudMapped = cloudAlerts.map { alertRecordToHistoryRecord(it) }
+        val localRecords = listOf(
             HistoryRecord(
                 title = historyTitle(localVisionState, connectionState),
                 detail = historyDetail(localVisionState),
@@ -314,6 +393,7 @@ internal fun VisionHubScreen(
                 accent = androidx.compose.ui.graphics.Color(0xFFE4D6FF),
             ),
         )
+        cloudMapped + localRecords
     }
     val filteredHistoryRecords = remember(historyRecords, historyQuery) {
         filterHistoryRecords(historyRecords, historyQuery)
@@ -443,7 +523,9 @@ internal fun VisionHubScreen(
                     .forEach { destination ->
                         val selected = currentDestination == destination ||
                             (destination == VisionHubDestination.RECOGNITION &&
-                                currentDestination == VisionHubDestination.HISTORY)
+                                currentDestination == VisionHubDestination.HISTORY) ||
+                            (destination == VisionHubDestination.PROFILE &&
+                                currentDestination == VisionHubDestination.ELDERLY)
                         NavigationBarItem(
                             selected = selected,
                             onClick = { currentDestination = destination },
@@ -509,7 +591,19 @@ internal fun VisionHubScreen(
                     currentDestination = VisionHubDestination.HISTORY
                 },
                 onObstacleSensitivity = { showSensitivitySheet = true },
-                onLogout = { /* future: user session management */ },
+                onLogout = {
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) { AuthPreference.clearJwt(context) }
+                        AuthTokenHolder.token = null
+                        AuthTokenHolder.userId = ""
+                        VisionDataHub.setLoggedIn(false)
+                    }
+                },
+                onElderlyProfile = { currentDestination = VisionHubDestination.ELDERLY },
+                modifier = Modifier.padding(innerPadding),
+            )
+            VisionHubDestination.ELDERLY -> ElderlyProfileScreen(
+                onBack = { currentDestination = VisionHubDestination.PROFILE },
                 modifier = Modifier.padding(innerPadding),
             )
             VisionHubDestination.HISTORY -> HistoryScreen(
@@ -560,6 +654,17 @@ private fun SensitivitySheetContent(
         }
         Spacer(modifier = Modifier.height(24.dp))
     }
+}
+
+private fun alertRecordToHistoryRecord(alert: AlertRecord): HistoryRecord {
+    val (title, accent) = when (alert.type) {
+        "FALL"     -> "跌倒告警" to androidx.compose.ui.graphics.Color(0xFFF2C4BE)
+        "OBSTACLE" -> "障碍告警" to androidx.compose.ui.graphics.Color(0xFFF6D68B)
+        "MEDICINE" -> "药品识别" to androidx.compose.ui.graphics.Color(0xFFC9DBFF)
+        else       -> "系统告警" to androidx.compose.ui.graphics.Color(0xFFD2EBCF)
+    }
+    val time = SimpleDateFormat("MM月dd日 HH:mm", Locale.CHINESE).format(Date(alert.timestamp))
+    return HistoryRecord(title = title, detail = alert.detail, time = time, accent = accent)
 }
 
 @Preview(showBackground = true)

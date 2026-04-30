@@ -1,34 +1,42 @@
 package com.example.myapplication.api
 
+import com.example.myapplication.auth.AuthTokenHolder
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
-/**
- * 后端服务器配置
- * 注意：生产环境应使用 HTTPS
- */
 object ApiConfig {
     const val BASE_URL = "http://47.94.146.53:3000"
 }
 
-/**
- * Retrofit 客户端提供者
- */
+private class AuthInterceptor : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val token = AuthTokenHolder.token
+        val request = if (token != null) {
+            chain.request().newBuilder()
+                .header("Authorization", "Bearer $token")
+                .build()
+        } else {
+            chain.request()
+        }
+        return chain.proceed(request)
+    }
+}
+
 object RetrofitClient {
 
     private val okHttpClient: OkHttpClient by lazy {
         val builder = OkHttpClient.Builder()
-
-        // 仅在 Debug 模式下启用日志
-        if (BuildConfig.DEBUG) {
+        builder.addInterceptor(AuthInterceptor())
+        if (com.example.myapplication.BuildConfig.DEBUG) {
             val loggingInterceptor = HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BASIC
             }
             builder.addInterceptor(loggingInterceptor)
         }
-
         builder.build()
     }
 
@@ -40,13 +48,12 @@ object RetrofitClient {
             .build()
     }
 
-    val userProfileApi: UserProfileApi by lazy {
-        retrofit.create(UserProfileApi::class.java)
-    }
+    val userProfileApi: UserProfileApi by lazy { retrofit.create(UserProfileApi::class.java) }
+    val authApi: AuthApi by lazy { retrofit.create(AuthApi::class.java) }
+    val elderlyApi: ElderlyApi by lazy { retrofit.create(ElderlyApi::class.java) }
+    val deviceApi: DeviceApi by lazy { retrofit.create(DeviceApi::class.java) }
+    val alertApi: AlertApi by lazy { retrofit.create(AlertApi::class.java) }
 
-    /**
-     * 创建 AI 服务 API 实例（支持动态 baseUrl）
-     */
     fun createAiServiceApi(baseUrl: String): AiServiceApi {
         val retrofit = Retrofit.Builder()
             .baseUrl(baseUrl)
@@ -55,11 +62,4 @@ object RetrofitClient {
             .build()
         return retrofit.create(AiServiceApi::class.java)
     }
-}
-
-/**
- * BuildConfig stub for non-Android environments
- */
-object BuildConfig {
-    const val DEBUG = true
 }
