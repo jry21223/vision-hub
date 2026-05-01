@@ -114,10 +114,17 @@ internal fun LoginScreen(
                             RetrofitClient.authApi.login(LoginRequest(phone.trim(), password))
                         }
                         val body = response.body()
+                        val serverMsg = body?.message
+                            ?: runCatching {
+                                response.errorBody()?.string()
+                                    ?.substringAfter("\"message\":\"")
+                                    ?.substringBefore("\"")
+                                    ?.takeIf { it.isNotEmpty() }
+                            }.getOrNull()
                         if (response.isSuccessful && body?.success == true && body.token != null) {
                             onLoginSuccess(body.token, body.userId ?: "", body.displayName ?: "")
                         } else {
-                            errorMessage = body?.message ?: "登录失败，请检查手机号和密码"
+                            errorMessage = serverMsg ?: "登录失败（HTTP ${response.code()}）"
                         }
                     } catch (e: Exception) {
                         errorMessage = "网络错误，请稍后重试"

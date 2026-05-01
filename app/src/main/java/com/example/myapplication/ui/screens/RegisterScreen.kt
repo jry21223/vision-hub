@@ -139,10 +139,17 @@ internal fun RegisterScreen(
                                     )
                                 }
                                 val body = response.body()
+                                val serverMsg = body?.message
+                                    ?: runCatching {
+                                        response.errorBody()?.string()
+                                            ?.substringAfter("\"message\":\"")
+                                            ?.substringBefore("\"")
+                                            ?.takeIf { it.isNotEmpty() }
+                                    }.getOrNull()
                                 if (response.isSuccessful && body?.success == true && body.token != null) {
                                     onRegisterSuccess(body.token, body.userId ?: "", body.displayName ?: displayName)
                                 } else {
-                                    errorMessage = body?.message ?: "注册失败，请稍后重试"
+                                    errorMessage = serverMsg ?: "注册失败（HTTP ${response.code()}）"
                                 }
                             } catch (e: Exception) {
                                 errorMessage = "网络错误，请稍后重试"
