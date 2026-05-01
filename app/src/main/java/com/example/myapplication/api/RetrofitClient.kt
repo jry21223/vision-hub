@@ -54,6 +54,7 @@ object RetrofitClient {
     val elderlyApi: ElderlyApi by lazy { retrofit.create(ElderlyApi::class.java) }
     val deviceApi: DeviceApi by lazy { retrofit.create(DeviceApi::class.java) }
     val alertApi: AlertApi by lazy { retrofit.create(AlertApi::class.java) }
+    val mediaApi: MediaApi by lazy { retrofit.create(MediaApi::class.java) }
 
     fun createAiServiceApi(baseUrl: String): AiServiceApi {
         val retrofit = Retrofit.Builder()
